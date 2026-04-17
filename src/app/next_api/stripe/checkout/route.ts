@@ -48,21 +48,26 @@ export async function POST(req: Request) {
           price_data: {
             currency: currency || "mxn",
             unit_amount: amount,
-            product_data: {
-              name: productName,
-              description: `Suscripción PlaneaDocente · ${interval === "year" ? "Plan Anual" : "Plan Mensual"}`,
-            },
-          },
-          quantity: quantity || 1,
-        },
-      ],
+
+            recurring: {
+        interval: interval === "year" ? "year" : "month", 
+      },
+      product_data: {
+        name: productName,
+        description: `Suscripción PlaneaDocente · ${interval === "year" ? "Plan Anual" : "Plan Mensual"}`,
+      },
+    },
+    quantity: quantity || 1,
+  },
+],
+
       // Estas URLs aseguran que el usuario regrese a tu .com
       success_url: `${baseUrl}/suscripcion/exito?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/suscripcion/cancelado`,
       // Permitir cupones o pruebas gratis si lo necesitas en el futuro
       allow_promotion_codes: true,
       subscription_data: {
-        trial_period_days: 15, // Aquí activas los 15 días de prueba que mencionas en tu web
+        trial_period_days: 15, 
       },
     });
 
