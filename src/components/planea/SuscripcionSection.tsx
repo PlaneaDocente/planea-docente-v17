@@ -199,13 +199,7 @@ export default function SuscripcionSection() {
       return;
     }
 
-    if (stripeConfigured === false) {
-      toast.error(
-        "Stripe no está configurado. Agrega STRIPE_SECRET_KEY en las variables de entorno de Vercel.",
-        { duration: 6000 }
-      );
-      return;
-    }
+    
 
     setIsLoading(plan.id);
     const annualPrice = Math.round(plan.precio_centavos * 10);
@@ -257,8 +251,7 @@ export default function SuscripcionSection() {
     <div className="space-y-8">
       <HeroBanner />
 
-      {stripeConfigured === false && <StripeWarningBanner />}
-
+      
       {!userId && <LoginRequiredBanner />}
 
       {activeSub && <ActiveSubscriptionBanner activeSub={activeSub} />}
@@ -300,7 +293,7 @@ export default function SuscripcionSection() {
         <TrustCard icon={<Star className="w-6 h-6 text-blue-500" />} title="Cancela Cuando Quieras" desc="Sin contratos ni penalizaciones por cancelación" />
       </div>
 
-      <StripeSetupCard onOpenConfig={() => setShowStripeConfig(true)} />
+      
 
       <PaymentHistoryTable />
 
