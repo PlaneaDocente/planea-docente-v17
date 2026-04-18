@@ -15,12 +15,8 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Coincide con todas las rutas de la app EXCEPTO:
-     * - /api/ (Permite que Stripe entre al webhook sin ser interrumpido)
-     * - /_next/static (archivos estáticos de Next)
-     * - /_next/image (imágenes)
-     * - favicon.ico (ícono del navegador)
+     * Excluimos EXPLÍCITAMENTE next_api para que Stripe entre libre
      */
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+    '/((?!api|next_api|_next/static|_next/image|favicon.ico).*)',
   ],
-}
+};
