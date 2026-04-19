@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import StatCard from "./StatCard";
 import MiniCalendar from "./MiniCalendar";
 import { useAppStore } from "@/store/app-store";
-import { supabase } from "@/integrations/supabase/client"; // Ajusta esta ruta si tu cliente de Supabase está en otra parte
+import { supabase } from "@/integrations/supabase/client";
 
 export default function DashboardSection() {
   const { setActiveSection } = useAppStore();
@@ -125,6 +125,16 @@ function QuickActions({ setActiveSection, isPro }: { setActiveSection: (s: any) 
     { label: "Mensaje a Padres", icon: MessageSquare, color: "bg-cyan-500 hover:bg-cyan-600", section: "padres", pro: true },
   ];
 
+  const handleClick = (action: any) => {
+    if (action.pro && !isPro) {
+      // Si es función Pro pero no tiene Pro, ir a suscripción
+      setActiveSection("suscripcion");
+    } else {
+      // Si tiene acceso, ir a la sección normal
+      setActiveSection(action.section);
+    }
+  };
+
   return (
     <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
       <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
@@ -133,18 +143,18 @@ function QuickActions({ setActiveSection, isPro }: { setActiveSection: (s: any) 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {actions.map((a) => {
           const Icon = a.icon;
-          const disabled = a.pro && !isPro;
+          const isLocked = a.pro && !isPro;
           return (
             <motion.button
               key={a.label}
-              whileHover={disabled ? {} : { scale: 1.03 }}
-              whileTap={disabled ? {} : { scale: 0.97 }}
-              onClick={() => !disabled && setActiveSection(a.section)}
-              className={`${a.color} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} text-white rounded-xl p-3 flex flex-col items-center gap-2 text-xs font-medium transition-colors shadow-sm relative`}
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => handleClick(a)}
+              className={`${a.color} ${isLocked ? 'opacity-70' : ''} text-white rounded-xl p-3 flex flex-col items-center gap-2 text-xs font-medium transition-colors shadow-sm relative`}
             >
               <Icon className="w-5 h-5" />
               {a.label}
-              {disabled && <span className="absolute -top-1 -right-1 bg-amber-400 text-black text-[10px] px-1 rounded">PRO</span>}
+              {isLocked && <span className="absolute -top-1 -right-1 bg-amber-400 text-black text-[10px] px-1 rounded">🔒 PRO</span>}
             </motion.button>
           );
         })}
