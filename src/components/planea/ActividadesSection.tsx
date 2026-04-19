@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from "react";
@@ -11,12 +10,12 @@ export default function ActividadesSection() {
   const [activeTab, setActiveTab] = useState<"tareas" | "proyectos" | "clase">("tareas");
 
   const tabs = [
-    { id: "tareas", label: "📋 Tareas" },
-    { id: "proyectos", label: "🗂️ Proyectos" },
-    { id: "clase", label: "🏫 En Clase" },
+    { id: "tareas" as const, label: "📋 Tareas" },
+    { id: "proyectos" as const, label: "🗂️ Proyectos" },
+    { id: "clase" as const, label: "🏫 En Clase" },
   ] as const;
 
-  const filtered = mockActividades.filter(a =>
+  const filtered = mockActividades.filter((a) =>
     activeTab === "tareas" ? a.tipo === "tarea" :
     activeTab === "proyectos" ? a.tipo === "proyecto" :
     a.tipo === "clase"
@@ -26,7 +25,7 @@ export default function ActividadesSection() {
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
         <div className="flex gap-2 flex-wrap">
-          {tabs.map(t => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
@@ -46,9 +45,14 @@ export default function ActividadesSection() {
       </div>
 
       <div className="grid gap-4">
-        {mockActividades.map((a, i) => (
+        {filtered.map((a, i) => (
           <ActividadCard key={a.id} actividad={a} index={i} />
         ))}
+        {filtered.length === 0 && (
+          <div className="text-center py-10 text-muted-foreground text-sm">
+            No hay actividades en esta categoría.
+          </div>
+        )}
       </div>
     </div>
   );

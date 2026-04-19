@@ -1,6 +1,6 @@
-
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Menu, Bell, Search, Moon, Sun, LogOut } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useAppStore } from "@/store/app-store";
@@ -31,13 +31,15 @@ interface TopBarProps {
 }
 
 export default function TopBar({ user }: TopBarProps) {
+  const router = useRouter();
   const { toggleSidebar, activeSection } = useAppStore();
   const { theme, setTheme } = useTheme();
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     toast.success("Sesión cerrada correctamente");
-    window.location.reload();
+    router.push("/");
+    router.refresh();
   };
 
   const displayName =
@@ -59,7 +61,7 @@ export default function TopBar({ user }: TopBarProps) {
         <h2 className="font-semibold text-base text-foreground">
           {sectionTitles[activeSection] ?? "PlaneaDocente"}
         </h2>
-        <p className="text-xs text-muted-foreground">Ciclo Escolar 2024-2025</p>
+        <p className="text-xs text-muted-foreground">Ciclo Escolar 2025-2026</p>
       </div>
 
       <div className="hidden md:flex items-center gap-2 bg-muted rounded-lg px-3 py-1.5">

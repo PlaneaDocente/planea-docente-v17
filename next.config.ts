@@ -1,7 +1,13 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  // Fuerza a que nadie use el dominio .vercel.app
+  images: {
+    remotePatterns: [
+      { protocol: 'https', hostname: 'images.unsplash.com' },
+      { protocol: 'https', hostname: '*.supabase.co' },
+    ],
+    unoptimized: true, // Fallback seguro para tus evidencias dinámicas
+  },
   async redirects() {
     return [
       {
@@ -9,7 +15,7 @@ const nextConfig: NextConfig = {
         has: [
           {
             type: 'host',
-            value: 'planea-docente-v17-eight.vercel.app',
+            value: 'planea-docente-v17-eight.vercel.app', // o el que tengas
           },
         ],
         destination: 'https://www.planeadocente.com/:path*',

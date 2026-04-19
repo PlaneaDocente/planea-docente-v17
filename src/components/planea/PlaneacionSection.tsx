@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from "react";
@@ -12,17 +11,17 @@ export default function PlaneacionSection() {
   const [showAIModal, setShowAIModal] = useState(false);
 
   const tabs = [
-    { id: "semanal", label: "📅 Semanal" },
-    { id: "proyecto", label: "🗂️ Por Proyecto" },
-    { id: "automatica", label: "🤖 Generación IA" },
-    { id: "biblioteca", label: "📚 Biblioteca" },
+    { id: "semanal" as const, label: "📅 Semanal" },
+    { id: "proyecto" as const, label: "🗂️ Por Proyecto" },
+    { id: "automatica" as const, label: "🤖 Generación IA" },
+    { id: "biblioteca" as const, label: "📚 Biblioteca" },
   ] as const;
 
   return (
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
         <div className="flex gap-2 flex-wrap">
-          {tabs.map(t => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
@@ -53,7 +52,7 @@ export default function PlaneacionSection() {
 }
 
 function PlaneacionesList({ tipo }: { tipo: string }) {
-  const filtered = mockPlaneaciones.filter(p => p.tipo === tipo);
+  const filtered = mockPlaneaciones.filter((p) => p.tipo === tipo);
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
@@ -76,9 +75,6 @@ function PlaneacionesList({ tipo }: { tipo: string }) {
           ))}
         </div>
       )}
-      {mockPlaneaciones.map((p, i) => (
-        <PlaneacionCard key={p.id} planeacion={p} index={i} />
-      ))}
     </div>
   );
 }
@@ -147,7 +143,7 @@ function GeneracionAutomatica({ onGenerate }: { onGenerate: () => void }) {
             "✅ Procesos de desarrollo",
             "✅ Estrategias didácticas",
             "✅ Evaluación integrada",
-          ].map(f => (
+          ].map((f) => (
             <div key={f} className="bg-white/10 rounded-xl px-3 py-2 text-sm">{f}</div>
           ))}
         </div>
@@ -197,8 +193,14 @@ function AIGeneratorModal({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState(1);
   const [generating, setGenerating] = useState(false);
   const [done, setDone] = useState(false);
+  
+  // Estados controlados del formulario
+  const [materia, setMateria] = useState("Matemáticas");
+  const [grado, setGrado] = useState("3° Primaria");
+  const [tema, setTema] = useState("");
 
   const handleGenerate = () => {
+    if (!tema.trim()) return;
     setGenerating(true);
     setTimeout(() => { setGenerating(false); setDone(true); }, 2500);
   };
@@ -214,7 +216,7 @@ function AIGeneratorModal({ onClose }: { onClose: () => void }) {
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border"
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 mb-5">
           <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-950 flex items-center justify-center">
@@ -230,7 +232,11 @@ function AIGeneratorModal({ onClose }: { onClose: () => void }) {
           <div className="space-y-4">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Materia</label>
-              <select className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+              <select 
+                className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border"
+                value={materia}
+                onChange={(e) => setMateria(e.target.value)}
+              >
                 <option>Matemáticas</option>
                 <option>Español</option>
                 <option>Ciencias Naturales</option>
@@ -239,7 +245,11 @@ function AIGeneratorModal({ onClose }: { onClose: () => void }) {
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Grado</label>
-              <select className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+              <select 
+                className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border"
+                value={grado}
+                onChange={(e) => setGrado(e.target.value)}
+              >
                 <option>3° Primaria</option>
                 <option>4° Primaria</option>
                 <option>5° Primaria</option>
@@ -250,11 +260,13 @@ function AIGeneratorModal({ onClose }: { onClose: () => void }) {
               <input
                 className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border"
                 placeholder="Ej: Fracciones equivalentes..."
+                value={tema}
+                onChange={(e) => setTema(e.target.value)}
               />
             </div>
             <div className="flex gap-3">
               <Button variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
-              <Button className="flex-1 gap-2" onClick={handleGenerate} disabled={generating}>
+              <Button className="flex-1 gap-2" onClick={handleGenerate} disabled={generating || !tema.trim()}>
                 {generating ? (
                   <><Clock className="w-4 h-4 animate-spin" /> Generando...</>
                 ) : (

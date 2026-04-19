@@ -1,4 +1,3 @@
-
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -37,45 +36,48 @@ export default function AppSidebar() {
     <>
       <AnimatePresence>
         {sidebarOpen && (
-          <motion.div
-            className="fixed inset-0 bg-black/40 z-20 lg:hidden"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setSidebarOpen(false)}
-          />
+          <>
+            <motion.div
+              className="fixed inset-0 bg-black/40 z-20 lg:hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setSidebarOpen(false)}
+            />
+            <motion.aside
+              className={cn(
+                "fixed top-0 left-0 h-full z-30 flex flex-col",
+                "bg-sidebar text-sidebar-foreground shadow-2xl",
+                "lg:relative lg:translate-x-0"
+              )}
+              initial={{ width: 0, x: -256 }}
+              animate={{ width: 256, x: 0 }}
+              exit={{ width: 0, x: -256 }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              style={{ overflow: "hidden" }}
+            >
+              <div className="flex flex-col h-full min-w-[256px]">
+                <SidebarHeader onClose={() => setSidebarOpen(false)} />
+                <nav className="flex-1 overflow-y-auto py-4 px-3">
+                  {navItems.map((item) => (
+                    <NavItem
+                      key={item.id}
+                      item={item}
+                      isActive={activeSection === item.id}
+                      onClick={() => {
+                        setActiveSection(item.id as typeof activeSection);
+                        if (window.innerWidth < 1024) setSidebarOpen(false);
+                      }}
+                    />
+                  ))}
+                </nav>
+                <SidebarFooter />
+              </div>
+            </motion.aside>
+          </>
         )}
       </AnimatePresence>
-
-      <motion.aside
-        className={cn(
-          "fixed top-0 left-0 h-full z-30 flex flex-col",
-          "bg-sidebar text-sidebar-foreground shadow-2xl",
-          "lg:relative lg:translate-x-0"
-        )}
-        initial={false}
-        animate={{ width: sidebarOpen ? 256 : 0, x: sidebarOpen ? 0 : -256 }}
-        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        style={{ overflow: "hidden" }}
-      >
-        <div className="flex flex-col h-full min-w-[256px]">
-          <SidebarHeader onClose={() => setSidebarOpen(false)} />
-          <nav className="flex-1 overflow-y-auto py-4 px-3">
-            {navItems.map((item) => (
-              <NavItem
-                key={item.id}
-                item={item}
-                isActive={activeSection === item.id}
-                onClick={() => {
-                  setActiveSection(item.id as typeof activeSection);
-                  if (window.innerWidth < 1024) setSidebarOpen(false);
-                }}
-              />
-            ))}
-          </nav>
-          <SidebarFooter />
-        </div>
-      </motion.aside>
     </>
   );
 }

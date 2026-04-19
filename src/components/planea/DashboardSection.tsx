@@ -13,6 +13,12 @@ import MiniCalendar from "./MiniCalendar";
 import { useAppStore } from "@/store/app-store";
 import { supabase } from "@/integrations/supabase/client";
 
+// FIX: Tipo basado en las secciones reales de tu app (extraído de AppSidebar)
+type SectionId = 
+  | "inicio" | "alumnos" | "asistencia" | "planeacion" | "actividades" 
+  | "evaluaciones" | "evidencias" | "reportes" | "padres" 
+  | "herramientas-ia" | "suscripcion" | "afiliados" | "configuracion" | "descargas";
+
 export default function DashboardSection() {
   const { setActiveSection } = useAppStore();
   const [profile, setProfile] = useState<any>(null);
@@ -27,7 +33,6 @@ export default function DashboardSection() {
           .select("*")
           .eq("id", user.id)
           .single();
-        
         if (!error && data) {
           setProfile(data);
         }
@@ -37,7 +42,6 @@ export default function DashboardSection() {
     fetchProfile();
   }, []);
 
-  // Datos reales del usuario o ceros por defecto
   const userName = profile?.nombre_completo || profile?.email?.split('@')[0] || "Maestro";
   const isPro = profile?.is_pro || false;
   const alumnosCount = profile?.total_alumnos || 0;
@@ -88,7 +92,7 @@ export default function DashboardSection() {
 function WelcomeBanner({ userName, isPro, pendingPlans, mensajes }: { userName: string, isPro: boolean, pendingPlans: number, mensajes: number }) {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Buenos días" : hour < 18 ? "Buenas tardes" : "Buenas noches";
-  
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
@@ -101,7 +105,7 @@ function WelcomeBanner({ userName, isPro, pendingPlans, mensajes }: { userName: 
             {greeting}, {userName} 👋
           </h2>
           <p className="text-white/80 text-sm">
-            {isPro 
+            {isPro
               ? `Plan Pro activo. Tienes ${pendingPlans} planeaciones pendientes y ${mensajes} mensajes nuevos.`
               : "Estás en el plan gratuito. Actualiza para desbloquear todas las herramientas."}
           </p>
@@ -115,22 +119,20 @@ function WelcomeBanner({ userName, isPro, pendingPlans, mensajes }: { userName: 
   );
 }
 
-function QuickActions({ setActiveSection, isPro }: { setActiveSection: (s: any) => void, isPro: boolean }) {
+function QuickActions({ setActiveSection, isPro }: { setActiveSection: (s: SectionId) => void, isPro: boolean }) {
   const actions = [
-    { label: "Tomar Asistencia", icon: CalendarCheck, color: "bg-emerald-500 hover:bg-emerald-600", section: "asistencia", pro: false },
-    { label: "Crear Planeación", icon: BookOpen, color: "bg-blue-500 hover:bg-blue-600", section: "planeacion", pro: true },
-    { label: "Nueva Actividad", icon: Target, color: "bg-purple-500 hover:bg-purple-600", section: "actividades", pro: true },
-    { label: "Subir Evidencia", icon: Camera, color: "bg-rose-500 hover:bg-rose-600", section: "evidencias", pro: true },
-    { label: "Generar Reporte", icon: BarChart3, color: "bg-amber-500 hover:bg-amber-600", section: "reportes", pro: true },
-    { label: "Mensaje a Padres", icon: MessageSquare, color: "bg-cyan-500 hover:bg-cyan-600", section: "padres", pro: true },
+    { label: "Tomar Asistencia", icon: CalendarCheck, color: "bg-emerald-500 hover:bg-emerald-600", section: "asistencia" as SectionId, pro: false },
+    { label: "Crear Planeación", icon: BookOpen, color: "bg-blue-500 hover:bg-blue-600", section: "planeacion" as SectionId, pro: true },
+    { label: "Nueva Actividad", icon: Target, color: "bg-purple-500 hover:bg-purple-600", section: "actividades" as SectionId, pro: true },
+    { label: "Subir Evidencia", icon: Camera, color: "bg-rose-500 hover:bg-rose-600", section: "evidencias" as SectionId, pro: true },
+    { label: "Generar Reporte", icon: BarChart3, color: "bg-amber-500 hover:bg-amber-600", section: "reportes" as SectionId, pro: true },
+    { label: "Mensaje a Padres", icon: MessageSquare, color: "bg-cyan-500 hover:bg-cyan-600", section: "padres" as SectionId, pro: true },
   ];
 
-  const handleClick = (action: any) => {
+  const handleClick = (action: typeof actions[0]) => {
     if (action.pro && !isPro) {
-      // Si es función Pro pero no tiene Pro, ir a suscripción
       setActiveSection("suscripcion");
     } else {
-      // Si tiene acceso, ir a la sección normal
       setActiveSection(action.section);
     }
   };
@@ -176,7 +178,7 @@ function RecentActivity() {
   );
 }
 
-function AIFeaturesBanner({ setActiveSection, isPro }: { setActiveSection: (s: any) => void, isPro: boolean }) {
+function AIFeaturesBanner({ setActiveSection, isPro }: { setActiveSection: (s: SectionId) => void, isPro: boolean }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -195,7 +197,7 @@ function AIFeaturesBanner({ setActiveSection, isPro }: { setActiveSection: (s: a
         className="w-full bg-white text-purple-700 hover:bg-white/90 font-semibold text-xs"
         onClick={() => setActiveSection(isPro ? "planeacion" : "suscripcion")}
       >
-        <Zap className="w-3.5 h-3.5 mr-1.5" /> 
+        <Zap className="w-3.5 h-3.5 mr-1.5" />
         {isPro ? "Generar con IA" : "Desbloquear IA"}
       </Button>
     </motion.div>

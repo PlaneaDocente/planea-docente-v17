@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -42,7 +41,6 @@ interface ActiveSubscription {
   plan: DbPlan | null;
 }
 
-// Fallback static plans when DB has no data yet
 const FALLBACK_PLANS: DbPlan[] = [
   {
     id: "basico",
@@ -190,7 +188,6 @@ export default function SuscripcionSection() {
   }, [loadData, checkStripeConfig]);
 
   const handleSubscribe = async (plan: DbPlan) => {
-    // Guard: user must be authenticated
     if (!userId) {
       toast.error(
         "Debes iniciar sesión para suscribirte. Por favor inicia sesión y vuelve a intentarlo.",
@@ -198,8 +195,6 @@ export default function SuscripcionSection() {
       );
       return;
     }
-
-    
 
     setIsLoading(plan.id);
     const annualPrice = Math.round(plan.precio_centavos * 10);
@@ -251,12 +246,13 @@ export default function SuscripcionSection() {
     <div className="space-y-8">
       <HeroBanner />
 
-      
       {!userId && <LoginRequiredBanner />}
 
       {activeSub && <ActiveSubscriptionBanner activeSub={activeSub} />}
 
       {!activeSub && userId && <TrialBanner />}
+
+      {stripeConfigured === false && <StripeWarningBanner />}
 
       <BillingToggle billingInterval={billingInterval} onChange={setBillingInterval} />
 
@@ -293,7 +289,7 @@ export default function SuscripcionSection() {
         <TrustCard icon={<Star className="w-6 h-6 text-blue-500" />} title="Cancela Cuando Quieras" desc="Sin contratos ni penalizaciones por cancelación" />
       </div>
 
-      
+      {stripeConfigured === false && <StripeSetupCard onOpenConfig={() => setShowStripeConfig(true)} />}
 
       <PaymentHistoryTable />
 

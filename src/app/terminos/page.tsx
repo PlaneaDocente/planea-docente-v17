@@ -4,7 +4,7 @@ export default function Terminos() {
       <div className="max-w-3xl mx-auto bg-white p-8 rounded-xl shadow-sm border border-gray-100">
         <header className="border-b border-gray-100 pb-6 mb-8">
           <h1 className="text-3xl font-extrabold text-[#4F46E5] mb-2">Términos del Servicio</h1>
-          <p className="text-gray-500">PlaneaDocente · Ciclo Escolar 2024-2025</p>
+          <p className="text-gray-500">PlaneaDocente · Ciclo Escolar 2025-2026</p>
         </header>
         
         <div className="prose prose-indigo max-w-none text-gray-600 space-y-6">

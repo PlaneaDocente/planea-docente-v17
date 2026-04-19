@@ -1,7 +1,6 @@
-
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { X, Eye, EyeOff, CreditCard, CheckCircle2, AlertCircle, ExternalLink, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +25,22 @@ export default function StripeConfigModal({ onClose }: StripeConfigModalProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Cargar configuración previa si existe (solo en desarrollo/local)
+  useEffect(() => {
+    const savedConfig = localStorage.getItem("pd_stripe_config");
+    if (savedConfig) {
+      try {
+        const parsed = JSON.parse(savedConfig);
+        setPublishableKey(parsed.publishableKey || "");
+        setWebhookSecret(parsed.webhookSecret || "");
+        setTestMode(parsed.testMode ?? true);
+        // Nunca cargamos secretKey desde localStorage por seguridad
+      } catch {
+        // Ignorar parse errors
+      }
+    }
+  }, []);
+
   const handleSave = async () => {
     if (!publishableKey || !secretKey) {
       toast.error("La clave pública y la clave secreta son obligatorias.");
@@ -40,10 +55,26 @@ export default function StripeConfigModal({ onClose }: StripeConfigModalProps) {
       return;
     }
     setIsSaving(true);
-    await new Promise((r) => setTimeout(r, 1200));
-    setSaved(true);
-    setIsSaving(false);
-    toast.success("Configuración de Stripe guardada correctamente.");
+    
+    try {
+      // Simulación de guardado - En producción, enviar a API segura
+      await new Promise((r) => setTimeout(r, 1200));
+      
+      // Guardar solo PK y webhook en localStorage (nunca la secret key)
+      localStorage.setItem("pd_stripe_config", JSON.stringify({
+        publishableKey,
+        webhookSecret,
+        testMode,
+        savedAt: new Date().toISOString(),
+      }));
+      
+      setSaved(true);
+      toast.success("Configuración de Stripe guardada correctamente.");
+    } catch {
+      toast.error("Error al guardar la configuración.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (

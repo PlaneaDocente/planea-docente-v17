@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useRef } from "react";
@@ -10,7 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { mockEvidencias } from "@/data/mock-data";
-import NextImage from "next/image";
+import Image from "next/image";
 import { upload } from "@zoerai/integration";
 import type { UploadResult } from "@zoerai/integration";
 
@@ -28,10 +27,10 @@ export default function EvidenciasSection() {
   const [activeTab, setActiveTab] = useState<"fotos" | "documentos" | "videos" | "portafolio">("fotos");
 
   const tabs = [
-    { id: "fotos", label: "📷 Fotos" },
-    { id: "documentos", label: "📄 Documentos" },
-    { id: "videos", label: "🎥 Videos" },
-    { id: "portafolio", label: "🗂️ Portafolio Digital" },
+    { id: "fotos" as const, label: "📷 Fotos" },
+    { id: "documentos" as const, label: "📄 Documentos" },
+    { id: "videos" as const, label: "🎥 Videos" },
+    { id: "portafolio" as const, label: "🗂️ Portafolio Digital" },
   ] as const;
 
   return (
@@ -86,26 +85,32 @@ function FileUploadZone({
     setUploadError(null);
     setLastResult(null);
 
-    const result = await upload.uploadWithPresignedUrl(file, {
-      maxSize: 5 * 1024 * 1024,
-      onProgress: (p) => setProgress(p),
-    });
-
-    setIsUploading(false);
-
-    if (result.success && result.url && result.fileKey) {
-      setLastResult(result);
-      onUploadComplete({
-        id: `file-${Date.now()}`,
-        name: file.name,
-        url: result.url,
-        fileKey: result.fileKey,
-        size: file.size,
-        type: file.type,
-        uploadedAt: Date.now(),
+    try {
+      const result = await upload.uploadWithPresignedUrl(file, {
+        maxSize: 5 * 1024 * 1024,
+        onProgress: (p) => setProgress(p),
       });
-    } else {
-      setUploadError(result.error ?? "Error al subir el archivo. Intenta de nuevo.");
+
+      if (result.success && result.url && result.fileKey) {
+        setLastResult(result);
+        onUploadComplete({
+          id: `file-${Date.now()}`,
+          name: file.name,
+          url: result.url,
+          fileKey: result.fileKey,
+          size: file.size,
+          type: file.type,
+          uploadedAt: Date.now(),
+        });
+      } else {
+        setUploadError(result.error ?? "Error al subir el archivo. Intenta de nuevo.");
+      }
+    } catch (err) {
+      console.error(err);
+      setUploadError("Error de conexión con el servicio de subida. Intenta más tarde.");
+    } finally {
+      setIsUploading(false);
+      setProgress(0);
     }
   };
 
@@ -231,6 +236,7 @@ function FotosView() {
                 className="bg-card rounded-2xl overflow-hidden border border-emerald-200 dark:border-emerald-800 shadow-sm group relative"
               >
                 <div className="relative h-40 overflow-hidden bg-muted">
+                  {/* Usamos img para URLs dinámicas de upload que pueden venir de cualquier CDN */}
                   <img
                     src={f.url}
                     alt={f.name}
@@ -274,10 +280,11 @@ function FotosView() {
               className="bg-card rounded-2xl overflow-hidden border border-border shadow-sm hover:shadow-md transition-shadow group"
             >
               <div className="relative h-40 overflow-hidden">
-                <NextImage
+                <Image
                   src={f.url}
                   alt={f.titulo}
                   fill
+                  unoptimized
                   className="object-cover group-hover:scale-105 transition-transform duration-300"
                 />
               </div>

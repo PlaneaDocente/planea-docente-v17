@@ -76,7 +76,7 @@ function EscuelaConfig() {
         <FormField label="Municipio" defaultValue="Toluca" />
         <FormField label="Estado" defaultValue="Estado de México" />
         <FormField label="Teléfono" defaultValue="722-123-4567" />
-        <FormField label="Ciclo escolar activo" defaultValue="2024-2025" />
+        <FormField label="Ciclo escolar activo" defaultValue="2025-2026" />
       </div>
       <Button className="gap-2"><Save className="w-4 h-4" /> Guardar Cambios</Button>
     </ConfigCard>
