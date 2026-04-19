@@ -16,11 +16,12 @@ interface Grupo {
 interface Alumno {
   id: string;
   nombre: string;
-  grado: string;
-  promedio: number;
-  asistencia: number;
+  apellido_paterno: string | null;
   grupo_id: string;
-  grupos?: { nombre: string } | null;
+  escuela_id: string | null;
+  estado: string | null;
+  created_at: string;
+  grupos?: { nombre: string; grado: string } | null;
 }
 
 export default function AlumnosSection() {
@@ -31,11 +32,11 @@ export default function AlumnosSection() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   
-  // Formulario nuevo alumno
+  // Formulario nuevo alumno (coincide con columnas reales de Supabase)
   const [nuevoAlumno, setNuevoAlumno] = useState({
     nombre: "",
-    grupo_id: "",
-    grado: ""
+    apellido_paterno: "",
+    grupo_id: ""
   });
   const [saving, setSaving] = useState(false);
 
@@ -62,12 +63,12 @@ export default function AlumnosSection() {
       if (gruposError) throw gruposError;
       setGrupos(gruposData || []);
 
-      // 2. Cargar alumnos que pertenezcan a esos grupos
+      // 2. Cargar alumnos que pertenezcan a esos grupos (con JOIN a grupos)
       if (gruposData && gruposData.length > 0) {
         const grupoIds = gruposData.map(g => g.id);
         const { data: alumnosData, error: alumnosError } = await supabase
           .from("alumnos")
-          .select("*, grupos(nombre)")
+          .select("*, grupos(nombre, grado)")
           .in("grupo_id", grupoIds)
           .order("nombre", { ascending: true });
 
@@ -93,21 +94,21 @@ export default function AlumnosSection() {
 
     setSaving(true);
     try {
-      const grupoSeleccionado = grupos.find(g => g.id === nuevoAlumno.grupo_id);
-      
+      // Insertar SOLO las columnas que existen en tu tabla (según la imagen)
       const { error } = await supabase.from("alumnos").insert({
         nombre: nuevoAlumno.nombre.trim(),
+        apellido_paterno: nuevoAlumno.apellido_paterno.trim() || null,
         grupo_id: nuevoAlumno.grupo_id,
-        grado: grupoSeleccionado?.grado || "",
-        promedio: 0,
-        asistencia: 100
+        estado: "activo"
+        // No enviamos: promedio, asistencia, grado (no existen en tu tabla)
+        // escuela_id se deja null o lo obtendrás del grupo si es necesario
       });
 
       if (error) throw error;
 
       toast.success("Alumno registrado correctamente");
       setShowModal(false);
-      setNuevoAlumno({ nombre: "", grupo_id: "", grado: "" });
+      setNuevoAlumno({ nombre: "", apellido_paterno: "", grupo_id: "" });
       cargarDatos(); // Recargar lista desde Supabase
     } catch (error: any) {
       console.error("Error creando alumno:", error);
@@ -118,7 +119,7 @@ export default function AlumnosSection() {
   };
 
   const filtered = alumnos.filter(a =>
-    a.nombre.toLowerCase().includes(search.toLowerCase())
+    (a.nombre + " " + (a.apellido_paterno || "")).toLowerCase().includes(search.toLowerCase())
   );
 
   const tabs = [
@@ -191,7 +192,7 @@ export default function AlumnosSection() {
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Buscar alumno..."
-                  className="bg-transparent text-sm outline-none flex-1 w-full"
+                  className="bg-transparent text-sm outline-none flex-1 w-full text-foreground placeholder:text-muted-foreground"
                 />
               </div>
               <span className="text-xs text-muted-foreground shrink-0">
@@ -262,13 +263,13 @@ export default function AlumnosSection() {
               <form onSubmit={handleCrearAlumno} className="space-y-4">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                    Nombre completo
+                    Nombre(s)
                   </label>
                   <input
                     type="text"
                     value={nuevoAlumno.nombre}
                     onChange={e => setNuevoAlumno({...nuevoAlumno, nombre: e.target.value})}
-                    placeholder="Ej: Ana García López"
+                    placeholder="Ej: Ana María"
                     className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border text-foreground"
                     required
                   />
@@ -276,24 +277,30 @@ export default function AlumnosSection() {
 
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                    Grupo
+                    Apellido Paterno
+                  </label>
+                  <input
+                    type="text"
+                    value={nuevoAlumno.apellido_paterno}
+                    onChange={e => setNuevoAlumno({...nuevoAlumno, apellido_paterno: e.target.value})}
+                    placeholder="Ej: García López"
+                    className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border text-foreground"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                    Grupo <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={nuevoAlumno.grupo_id}
-                    onChange={e => {
-                      const grupo = grupos.find(g => g.id === e.target.value);
-                      setNuevoAlumno({
-                        ...nuevoAlumno,
-                        grupo_id: e.target.value,
-                        grado: grupo?.grado || ""
-                      });
-                    }}
+                    onChange={e => setNuevoAlumno({...nuevoAlumno, grupo_id: e.target.value})}
                     className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border text-foreground"
                     required
                   >
                     <option value="">Selecciona un grupo</option>
                     {grupos.map(g => (
-                      <option key={g.id} value={g.id}>{g.nombre} ({g.grado})</option>
+                      <option key={g.id} value={g.id}>{g.nombre} — {g.grado}</option>
                     ))}
                   </select>
                 </div>
@@ -317,6 +324,8 @@ export default function AlumnosSection() {
 }
 
 function AlumnoRow({ alumno, index }: { alumno: Alumno; index: number }) {
+  const nombreCompleto = `${alumno.nombre} ${alumno.apellido_paterno || ""}`.trim();
+  
   const iniciales = alumno.nombre
     .split(" ")
     .map(n => n[0])
@@ -335,22 +344,19 @@ function AlumnoRow({ alumno, index }: { alumno: Alumno; index: number }) {
         <span className="text-xs font-bold text-primary">{iniciales}</span>
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground truncate">{alumno.nombre}</p>
+        <p className="text-sm font-medium text-foreground truncate">{nombreCompleto}</p>
         <p className="text-xs text-muted-foreground">
-          {alumno.grado} {alumno.grupos?.nombre ? `· ${alumno.grupos.nombre}` : ""}
+          {alumno.grupos?.grado || ""} {alumno.grupos?.nombre ? `· ${alumno.grupos.nombre}` : ""}
         </p>
       </div>
-      <div className="hidden sm:flex items-center gap-4">
-        <div className="text-center">
-          <p className="text-sm font-bold text-foreground">{alumno.promedio ?? 0}</p>
-          <p className="text-xs text-muted-foreground">Promedio</p>
-        </div>
-        <div className="text-center">
-          <p className={`text-sm font-bold ${(alumno.asistencia ?? 0) >= 90 ? "text-emerald-600" : "text-amber-600"}`}>
-            {alumno.asistencia ?? 0}%
-          </p>
-          <p className="text-xs text-muted-foreground">Asistencia</p>
-        </div>
+      <div className="hidden sm:flex items-center gap-3">
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+          alumno.estado === "activo" 
+            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
+            : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400"
+        }`}>
+          {alumno.estado || "Sin estado"}
+        </span>
       </div>
       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <Button variant="ghost" size="icon" className="h-7 w-7"><Eye className="w-3.5 h-3.5" /></Button>
@@ -376,12 +382,11 @@ function HistorialView({ alumnos }: { alumnos: Alumno[] }) {
                 <span className="text-xs font-bold text-primary">{a.nombre[0]}</span>
               </div>
               <div className="flex-1">
-                <p className="text-sm font-medium text-foreground">{a.nombre}</p>
-                <p className="text-xs text-muted-foreground">Ciclo 2025-2026 · {a.grado}</p>
+                <p className="text-sm font-medium text-foreground">{a.nombre} {a.apellido_paterno || ""}</p>
+                <p className="text-xs text-muted-foreground">Ciclo 2025-2026 · {a.grupos?.grado || ""} {a.grupos?.nombre || ""}</p>
               </div>
               <div className="text-right">
-                <p className="text-sm font-bold text-foreground">{a.promedio ?? 0}</p>
-                <p className="text-xs text-emerald-600">Aprobado</p>
+                <p className="text-xs text-emerald-600 font-medium">{a.estado || "Sin estado"}</p>
               </div>
             </div>
           ))}
