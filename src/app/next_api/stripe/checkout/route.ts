@@ -68,7 +68,7 @@ export async function POST(req: Request) {
 
     // ── 3. CREAR SESIÓN DE STRIPE ───────────────────────────────────────────
     const stripe = new Stripe(stripeSecretKey, {
-      apiVersion: '2026-03-25.dahlia',
+      apiVersion: '2026-04-22.dahlia',
     });
 
     const baseUrl = process.env.NEXT_PUBLIC_STRIPE_URL || "https://www.planeadocente.com";
