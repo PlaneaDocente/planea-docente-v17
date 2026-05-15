@@ -1,15 +1,12 @@
-
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Wand2, Sparkles, ImageIcon, Download, RefreshCw,
   CheckCircle2, AlertCircle, Loader2, X, ZoomIn,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { aiImage } from "@zoerai/integration";
-import type { TextToImageResult } from "@zoerai/integration";
 
 type AspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:2";
 
@@ -38,10 +35,52 @@ const promptSuggestions = [
   "Salón de clases moderno con tecnología educativa",
 ];
 
+// Clave para localStorage
+const STORAGE_KEY = "planeadocente_gallery";
+
+// Función auxiliar para tamaños de Pollinations.ai
+const getSizeForPollinations = (ratio: AspectRatio) => {
+  switch (ratio) {
+    case "1:1": return { width: 1024, height: 1024 };
+    case "16:9": return { width: 1024, height: 576 };
+    case "9:16": return { width: 576, height: 1024 };
+    case "4:3": return { width: 1024, height: 768 };
+    case "3:2": return { width: 1024, height: 683 };
+    default: return { width: 1024, height: 1024 };
+  }
+};
+
+// Mejorar el prompt para Pollinations (más coherente con educación)
+const enhancePrompt = (prompt: string) => {
+  return `educational illustration, Mexican school, NEM style, watercolor, children learning, inclusive, no text, no letters: ${prompt}`;
+};
+
 export default function HerramientasIASection() {
   const [activeTab, setActiveTab] = useState<"generador" | "galeria">("generador");
   const [gallery, setGallery] = useState<GeneratedImage[]>([]);
   const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null);
+
+  // Cargar galería desde localStorage al iniciar
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as GeneratedImage[];
+        setGallery(parsed);
+      }
+    } catch (e) {
+      console.error("Error cargando galería:", e);
+    }
+  }, []);
+
+  // Guardar galería en localStorage cada vez que cambie
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(gallery));
+    } catch (e) {
+      console.error("Error guardando galería:", e);
+    }
+  }, [gallery]);
 
   const tabs = [
     { id: "generador", label: "🎨 Generador de Imágenes" },
@@ -127,44 +166,57 @@ function ImageGeneratorPanel({ onImageGenerated }: { onImageGenerated: (img: Gen
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<TextToImageResult | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
     setIsGenerating(true);
     setProgress(0);
-    setResult(null);
+    setImageUrl(null);
     setError(null);
 
+    const interval = setInterval(() => {
+      setProgress((prev) => Math.min(prev + 5, 90));
+    }, 500);
+
     try {
-      const res = await aiImage.textToImage(prompt.trim(), {
-        aspectRatio,
-        onProgress: (p) => setProgress(p),
+      const size = getSizeForPollinations(aspectRatio);
+      const enhancedPrompt = enhancePrompt(prompt.trim());
+      const encodedPrompt = encodeURIComponent(enhancedPrompt);
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${size.width}&height=${size.height}&nologo=true&seed=${Date.now()}`;
+
+      // Precargar la imagen para verificar que existe antes de mostrarla
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("No se pudo cargar la imagen generada"));
+        img.src = pollinationsUrl;
+        // Timeout de seguridad AUMENTADO a 45 segundos
+        setTimeout(() => reject(new Error("Timeout generando imagen (45s). Intenta con una descripción más corta.")), 45000);
       });
 
-      if (res.success && res.imageUrl) {
-        setResult(res);
-        onImageGenerated({
-          id: `img-${Date.now()}`,
-          prompt: prompt.trim(),
-          imageUrl: res.imageUrl,
-          aspectRatio,
-          timestamp: Date.now(),
-        });
-      } else {
-        setError(res.error ?? "No se pudo generar la imagen. Intenta de nuevo.");
-      }
-    } catch {
-      setError("Ocurrió un error inesperado. Por favor intenta de nuevo.");
+      clearInterval(interval);
+      setProgress(100);
+
+      setImageUrl(pollinationsUrl);
+      onImageGenerated({
+        id: `img-${Date.now()}`,
+        prompt: prompt.trim(), // Guardamos el prompt original, no el enhanced
+        imageUrl: pollinationsUrl,
+        aspectRatio,
+        timestamp: Date.now(),
+      });
+    } catch (error: any) {
+      clearInterval(interval);
+      setError(error.message || "Error al generar imagen. Intenta con otra descripción.");
     } finally {
       setIsGenerating(false);
-      setProgress(0);
     }
   };
 
   const handleReset = () => {
-    setResult(null);
+    setImageUrl(null);
     setError(null);
     setPrompt("");
   };
@@ -179,12 +231,12 @@ function ImageGeneratorPanel({ onImageGenerated }: { onImageGenerated: (img: Gen
         isGenerating={isGenerating}
         onGenerate={handleGenerate}
         onReset={handleReset}
-        hasResult={!!result}
+        hasResult={!!imageUrl}
       />
       <ResultPanel
         isGenerating={isGenerating}
         progress={progress}
-        result={result}
+        imageUrl={imageUrl}
         error={error}
         prompt={prompt}
       />
@@ -305,20 +357,20 @@ function SuggestionsPanel({ onSelect }: { onSelect: (v: string) => void }) {
 function ResultPanel({
   isGenerating,
   progress,
-  result,
+  imageUrl,
   error,
   prompt,
 }: {
   isGenerating: boolean;
   progress: number;
-  result: TextToImageResult | null;
+  imageUrl: string | null;
   error: string | null;
   prompt: string;
 }) {
   const handleDownload = async () => {
-    if (!result?.imageUrl) return;
+    if (!imageUrl) return;
     try {
-      const response = await fetch(result.imageUrl);
+      const response = await fetch(imageUrl);
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -327,7 +379,7 @@ function ResultPanel({
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      window.open(result.imageUrl, "_blank");
+      window.open(imageUrl, "_blank");
     }
   };
 
@@ -338,7 +390,7 @@ function ResultPanel({
           <ImageIcon className="w-4 h-4 text-purple-500" />
           Imagen Generada
         </h3>
-        {result?.imageUrl && (
+        {imageUrl && (
           <Button size="sm" variant="outline" onClick={handleDownload} className="gap-1.5 text-xs h-7">
             <Download className="w-3 h-3" /> Descargar
           </Button>
@@ -347,25 +399,58 @@ function ResultPanel({
 
       <div className="aspect-video flex items-center justify-center bg-muted/30 relative">
         {isGenerating && (
-          <GeneratingState progress={progress} />
+          <div className="flex flex-col items-center gap-4 p-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-violet-100 dark:bg-violet-950 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 text-violet-600 animate-spin" />
+            </div>
+            <div className="w-full max-w-xs">
+              <p className="text-sm font-medium mb-2">Generando imagen con IA...</p>
+              <div className="w-full bg-muted rounded-full h-2">
+                <motion.div
+                  className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-purple-600"
+                  initial={{ width: "0%" }}
+                  animate={{ width: `${progress}%` }}
+                  transition={{ duration: 0.3 }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">{progress}%</p>
+              <p className="text-xs text-muted-foreground mt-1">Esto puede tardar hasta 45 segundos</p>
+            </div>
+          </div>
         )}
 
-        {!isGenerating && !result && !error && (
-          <EmptyState />
+        {!isGenerating && !imageUrl && !error && (
+          <div className="flex flex-col items-center gap-3 p-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
+              <Wand2 className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium text-muted-foreground">
+              Escribe una descripción y presiona "Generar Imagen"
+            </p>
+            <p className="text-xs text-muted-foreground">
+              La imagen aparecerá aquí en unos segundos
+            </p>
+          </div>
         )}
 
         {!isGenerating && error && (
-          <ErrorState error={error} />
+          <div className="flex flex-col items-center gap-3 p-8 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-red-100 dark:bg-red-950 flex items-center justify-center">
+              <AlertCircle className="w-8 h-8 text-red-500" />
+            </div>
+            <p className="text-sm font-medium text-red-600 dark:text-red-400">Error al generar</p>
+            <p className="text-xs text-muted-foreground max-w-xs">{error}</p>
+          </div>
         )}
 
-        {!isGenerating && result?.imageUrl && (
+        {!isGenerating && imageUrl && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className="w-full h-full"
           >
             <img
-              src={result.imageUrl}
+              src={imageUrl}
               alt={prompt}
               className="w-full h-full object-contain"
             />
@@ -373,7 +458,7 @@ function ResultPanel({
         )}
       </div>
 
-      {result?.imageUrl && (
+      {imageUrl && (
         <div className="p-4 border-t border-border bg-muted/20">
           <p className="text-xs text-muted-foreground line-clamp-2">
             <span className="font-medium text-foreground">Prompt: </span>
@@ -381,56 +466,6 @@ function ResultPanel({
           </p>
         </div>
       )}
-    </div>
-  );
-}
-
-function GeneratingState({ progress }: { progress: number }) {
-  return (
-    <div className="flex flex-col items-center gap-4 p-8 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-violet-100 dark:bg-violet-950 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-violet-600 animate-spin" />
-      </div>
-      <div className="w-full max-w-xs">
-        <p className="text-sm font-medium mb-2">Generando imagen con IA...</p>
-        <div className="w-full bg-muted rounded-full h-2">
-          <motion.div
-            className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-purple-600"
-            initial={{ width: "0%" }}
-            animate={{ width: `${progress}%` }}
-            transition={{ duration: 0.3 }}
-          />
-        </div>
-        <p className="text-xs text-muted-foreground mt-1">{progress}%</p>
-      </div>
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="flex flex-col items-center gap-3 p-8 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
-        <Wand2 className="w-8 h-8 text-muted-foreground" />
-      </div>
-      <p className="text-sm font-medium text-muted-foreground">
-        Escribe una descripción y presiona "Generar Imagen"
-      </p>
-      <p className="text-xs text-muted-foreground">
-        La imagen aparecerá aquí en unos segundos
-      </p>
-    </div>
-  );
-}
-
-function ErrorState({ error }: { error: string }) {
-  return (
-    <div className="flex flex-col items-center gap-3 p-8 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-red-100 dark:bg-red-950 flex items-center justify-center">
-        <AlertCircle className="w-8 h-8 text-red-500" />
-      </div>
-      <p className="text-sm font-medium text-red-600 dark:text-red-400">Error al generar</p>
-      <p className="text-xs text-muted-foreground max-w-xs">{error}</p>
     </div>
   );
 }

@@ -1,22 +1,35 @@
-
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  GraduationCap, Mail, Lock, Eye, EyeOff, Loader2,
-  Chrome, CheckCircle2, AlertCircle, ArrowRight,
-  Sparkles, BookOpen, Users, Brain, Star,
+  GraduationCap,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  Loader2,
+  Chrome,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight,
+  Sparkles,
+  BookOpen,
+  Users,
+  Brain,
+  Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 type AuthMode = "login" | "register";
 
 interface AuthGateProps {
-  onAuthenticated: (user: User) => void;
+  onAuthenticated: (user: User, subscription: { hasPlan: boolean; planName: string | null }) => void;
 }
 
 export default function AuthGate({ onAuthenticated }: AuthGateProps) {
@@ -29,47 +42,244 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  const [failedAttempts, setFailedAttempts] = useState(0);
 
-  const handleAuthenticated = useCallback(
-    (user: User) => { onAuthenticated(user); },
+  // ── Capturar parámetro de referido ─────────────────────────────────────────
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const refCode = urlParams.get("ref");
+    if (refCode) {
+      localStorage.setItem("affiliate_ref", refCode);
+    }
+  }, []);
+
+  /**
+   * Consulta la suscripción del usuario y notifica al padre con
+   * información completa (no solo el User).
+   */
+  const checkSubscriptionAndNotify = useCallback(
+    async (user: User) => {
+      try {
+        const res = await fetch(`/api/user-subscription?user_id=${user.id}`, {
+          cache: "no-store",
+        });
+        const json = await res.json();
+
+        if (!res.ok || !json.success) {
+          console.warn("[AuthGate] Subscription check failed:", json.error);
+          onAuthenticated(user, { hasPlan: false, planName: null });
+          return;
+        }
+
+        const sub = json.data?.subscription;
+        const plan = json.data?.plan;
+        const hasPlan = sub && ["trialing", "active", "past_due"].includes(sub.estado);
+
+        onAuthenticated(user, {
+          hasPlan: !!hasPlan,
+          planName: plan?.nombre ?? null,
+        });
+      } catch (err) {
+        console.error("[AuthGate] Error checking subscription:", err);
+        onAuthenticated(user, { hasPlan: false, planName: null });
+      }
+    },
     [onAuthenticated]
   );
 
+  // ── Verificar sesión existente al montar ─────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session?.user) {
-        handleAuthenticated(data.session.user);
+        checkSubscriptionAndNotify(data.session.user);
       } else {
         setCheckingSession(false);
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) handleAuthenticated(session.user);
-    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (session?.user) {
+          checkSubscriptionAndNotify(session.user);
+        }
+      }
+    );
 
     return () => subscription.unsubscribe();
-  }, [handleAuthenticated]);
+  }, [checkSubscriptionAndNotify]);
+
+  /**
+   * Crea una suscripción de prueba automáticamente para un usuario recién registrado.
+   */
+  const createTrialSubscription = async (userId: string): Promise<boolean> => {
+    try {
+      const plansRes = await fetch("/api/subscription-plans", { cache: "no-store" });
+      const plansJson = await plansRes.json();
+
+      if (!plansRes.ok || !plansJson.success || !plansJson.data?.length) {
+        console.warn("[AuthGate] No plans available for trial.");
+        return false;
+      }
+
+      const plans = plansJson.data as Array<{ id: string; nombre: string }>;
+      const trialPlan =
+        plans.find((p) => p.nombre.toLowerCase().includes("profesional")) ??
+        plans.find((p) => p.nombre.toLowerCase().includes("trial")) ??
+        plans.find((p) => p.nombre.toLowerCase().includes("prueba")) ??
+        plans[0];
+
+      if (!trialPlan) return false;
+
+      const refCode = localStorage.getItem("affiliate_ref");
+
+      const subRes = await fetch("/api/user-subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          plan_id: trialPlan.id,
+          estado: "trialing",
+          metadata: {
+            source: "auto_trial_on_authgate_register",
+            referral_code: refCode || null,
+            registered_at: new Date().toISOString(),
+          },
+        }),
+      });
+
+      const subJson = await subRes.json();
+      return subRes.ok && subJson.success;
+    } catch (err) {
+      console.error("[AuthGate] Error creating trial:", err);
+      return false;
+    }
+  };
+
+  /**
+   * Guarda el referido en la base de datos (envuelto en try-catch para no romper el registro).
+   */
+  const saveReferral = async (userEmail: string) => {
+    try {
+      const refCode = localStorage.getItem("affiliate_ref");
+      if (!refCode) return;
+
+      const { data: affiliate } = await supabase
+        .from("affiliate_programs")
+        .select("id")
+        .eq("codigo_referido", refCode)
+        .maybeSingle();
+
+      if (affiliate) {
+        await supabase.from("affiliate_referrals").insert({
+          affiliate_id: affiliate.id,
+          email_referido: userEmail,
+          estado: "registrado",
+        });
+      }
+      localStorage.removeItem("affiliate_ref");
+    } catch (err) {
+      console.warn("[AuthGate] Referral save failed (non-blocking):", err);
+    }
+  };
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    const trimmedEmail = email.trim();
+    const trimmedName = fullName.trim();
+
+    // ── Validaciones cliente ─────────────────────────────────────────────────
+    if (!trimmedEmail || !password) {
+      setError("Por favor ingresa tu email y contraseña.");
+      return;
+    }
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setError("Por favor ingresa un email válido.");
+      return;
+    }
+
+    if (mode === "register") {
+      if (!trimmedName || trimmedName.length < 2) {
+        setError("El nombre debe tener al menos 2 caracteres.");
+        return;
+      }
+      if (password.length < 8) {
+        setError("La contraseña debe tener al menos 8 caracteres.");
+        return;
+      }
+      if (!/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+        setError("La contraseña debe incluir al menos una mayúscula y un número.");
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       if (mode === "register") {
-        const { error: signUpError } = await supabase.auth.signUp({
-          email,
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: trimmedEmail,
           password,
           options: {
-            data: { full_name: fullName },
-            emailRedirectTo: `${window.location.origin}/`,
+            data: { full_name: trimmedName },
+            emailRedirectTo: `${window.location.origin}/login`,
           },
         });
+
         if (signUpError) throw signUpError;
-        toast.success("¡Cuenta creada! Revisa tu correo para confirmar tu cuenta.");
+
+        // Guardar referido (no bloqueante)
+        await saveReferral(trimmedEmail);
+
+        // Crear trial automáticamente
+        const userId = signUpData.user?.id;
+        let trialCreated = false;
+        if (userId) {
+          trialCreated = await createTrialSubscription(userId);
+        }
+
+        if (trialCreated) {
+          toast.success("¡Cuenta creada! Tu prueba gratuita de 15 días ha sido activada.");
+        } else {
+          toast.success("¡Cuenta creada! Revisa tu correo para confirmar tu cuenta.");
+          toast.warning(
+            "No pudimos activar tu prueba automáticamente. Contacta soporte si no ves tus funciones premium.",
+            { duration: 6000 }
+          );
+        }
+
+        // Cambiar a modo login para que el usuario inicie sesión
+        setMode("login");
+        setPassword("");
       } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-        if (signInError) throw signInError;
+        // Login
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password,
+        });
+
+        if (signInError) {
+          const newAttempts = failedAttempts + 1;
+          setFailedAttempts(newAttempts);
+
+          let message = signInError.message;
+          if (signInError.message.includes("Invalid login credentials")) {
+            message = "Correo o contraseña incorrectos.";
+          } else if (signInError.message.includes("Email not confirmed")) {
+            message = "Confirma tu correo antes de iniciar sesión.";
+          } else if (signInError.message.includes("rate limit")) {
+            message = "Demasiados intentos. Espera un momento.";
+          }
+          setError(message);
+          return;
+        }
+
+        setFailedAttempts(0);
+        toast.success("¡Bienvenido de vuelta!");
+
+        if (data.user) {
+          await checkSubscriptionAndNotify(data.user);
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error desconocido";
@@ -79,28 +289,20 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
     }
   };
 
+  // ── Google OAuth (redirect directo, sin popup) ────────────────────────────
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
     setError(null);
     try {
-      const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/`,
-          skipBrowserRedirect: true,
+          redirectTo: `${window.location.origin}/dashboard`,
         },
       });
+
       if (oauthError) throw oauthError;
-      if (data?.url) {
-        const popup = window.open(data.url, "google-login", "width=500,height=600,left=200,top=100");
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-          if (event === "SIGNED_IN" && session) {
-            popup?.close();
-            subscription.unsubscribe();
-            setGoogleLoading(false);
-          }
-        });
-      }
+      // signInWithOAuth redirige automáticamente el navegador.
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Error con Google";
       setError(translateError(msg));
@@ -111,7 +313,10 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
   if (checkingSession) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <div className="text-center space-y-3">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto" />
+          <p className="text-sm text-muted-foreground">Verificando sesión...</p>
+        </div>
       </div>
     );
   }
@@ -182,6 +387,7 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="Ej: Ana Martínez López"
                     required={mode === "register"}
+                    autoComplete="name"
                     className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary transition-colors"
                   />
                 </motion.div>
@@ -200,6 +406,7 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="tu@correo.com"
                   required
+                  autoComplete="email"
                   className="w-full bg-muted rounded-xl pl-9 pr-3 py-2.5 text-sm outline-none border border-border focus:border-primary transition-colors"
                 />
               </div>
@@ -215,19 +422,30 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder={mode === "register" ? "Mínimo 8 caracteres, 1 mayúscula, 1 número" : "••••••••"}
                   required
-                  minLength={6}
+                  minLength={mode === "register" ? 8 : 1}
+                  autoComplete={mode === "register" ? "new-password" : "current-password"}
                   className="w-full bg-muted rounded-xl pl-9 pr-10 py-2.5 text-sm outline-none border border-border focus:border-primary transition-colors"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  tabIndex={-1}
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
                 </button>
               </div>
+              {mode === "register" && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Mínimo 8 caracteres, incluir mayúscula y número.
+                </p>
+              )}
             </div>
 
             <AnimatePresence>
@@ -244,7 +462,21 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
               )}
             </AnimatePresence>
 
-            <Button type="submit" className="w-full gap-2 h-11 font-semibold" disabled={loading}>
+            {failedAttempts >= 3 && mode === "login" && (
+              <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-300">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  Has fallado {failedAttempts} veces. Si olvidaste tu contraseña,
+                  contacta soporte o crea una nueva cuenta.
+                </span>
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              className="w-full gap-2 h-11 font-semibold"
+              disabled={loading || googleLoading}
+            >
               {loading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
@@ -257,7 +489,11 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
           <p className="text-center text-sm text-muted-foreground mt-4">
             {mode === "login" ? "¿No tienes cuenta?" : "¿Ya tienes cuenta?"}{" "}
             <button
-              onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(null); }}
+              onClick={() => {
+                setMode(mode === "login" ? "register" : "login");
+                setError(null);
+                setFailedAttempts(0);
+              }}
               className="text-primary font-semibold hover:underline"
             >
               {mode === "login" ? "Regístrate gratis" : "Inicia sesión"}
@@ -266,8 +502,15 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
 
           {mode === "register" && (
             <div className="mt-4 space-y-1.5">
-              {["15 días de prueba gratis", "Sin tarjeta de crédito", "Cancela cuando quieras"].map((f) => (
-                <div key={f} className="flex items-center gap-2 text-xs text-muted-foreground">
+              {[
+                "15 días de prueba gratis",
+                "Sin tarjeta de crédito",
+                "Cancela cuando quieras",
+              ].map((f) => (
+                <div
+                  key={f}
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                >
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                   {f}
                 </div>
@@ -282,10 +525,26 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
 
 function LandingPanel() {
   const features = [
-    { icon: Brain, label: "IA Generadora de Planeaciones", desc: "Crea planeaciones NEM en segundos" },
-    { icon: Users, label: "Control de Alumnos", desc: "Asistencia, calificaciones y más" },
-    { icon: BookOpen, label: "Biblioteca Didáctica", desc: "Cientos de actividades listas" },
-    { icon: Star, label: "Reportes Avanzados", desc: "Estadísticas en tiempo real" },
+    {
+      icon: Brain,
+      label: "IA Generadora de Planeaciones",
+      desc: "Crea planeaciones NEM en segundos",
+    },
+    {
+      icon: Users,
+      label: "Control de Alumnos",
+      desc: "Asistencia, calificaciones y más",
+    },
+    {
+      icon: BookOpen,
+      label: "Biblioteca Didáctica",
+      desc: "Cientos de actividades listas",
+    },
+    {
+      icon: Star,
+      label: "Reportes Avanzados",
+      desc: "Estadísticas en tiempo real",
+    },
   ];
 
   return (
@@ -348,10 +607,15 @@ function LandingPanel() {
 }
 
 function translateError(msg: string): string {
-  if (msg.includes("Invalid login credentials")) return "Correo o contraseña incorrectos.";
-  if (msg.includes("Email not confirmed")) return "Confirma tu correo antes de iniciar sesión.";
-  if (msg.includes("User already registered")) return "Este correo ya está registrado. Inicia sesión.";
-  if (msg.includes("Password should be at least")) return "La contraseña debe tener al menos 6 caracteres.";
-  if (msg.includes("rate limit")) return "Demasiados intentos. Espera un momento.";
+  if (msg.includes("Invalid login credentials"))
+    return "Correo o contraseña incorrectos.";
+  if (msg.includes("Email not confirmed"))
+    return "Confirma tu correo antes de iniciar sesión.";
+  if (msg.includes("User already registered"))
+    return "Este correo ya está registrado. Inicia sesión.";
+  if (msg.includes("Password should be at least"))
+    return "La contraseña debe tener al menos 8 caracteres.";
+  if (msg.includes("rate limit"))
+    return "Demasiados intentos. Espera un momento.";
   return msg;
 }
