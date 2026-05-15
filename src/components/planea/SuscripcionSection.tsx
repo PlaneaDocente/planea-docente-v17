@@ -15,15 +15,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   INTERFAZ UNIFICADA DE PLAN — Compatible con /api/subscription-plans
+   ═══════════════════════════════════════════════════════════════════════════ */
 interface DbPlan {
   id: string;
   nombre: string;
   descripcion: string | null;
   precio_centavos: number;
+  precio_centavos_anual?: number | null;
   moneda: string;
   intervalo: "month" | "year";
   dias_prueba: number;
   stripe_price_id: string | null;
+  stripe_price_id_anual?: string | null;
   caracteristicas: string[];
   activo: boolean;
   orden: number;
@@ -52,23 +57,51 @@ interface PaymentRecord {
   metodo: string;
 }
 
+/* ── Planes fallback (solo UI de emergencia) ──────────────────────────── */
 const FALLBACK_PLANS: DbPlan[] = [
   {
-    id: "basico", nombre: "Básico", precio_centavos: 9900, moneda: "mxn",
-    intervalo: "month", dias_prueba: 15, stripe_price_id: null,
-    descripcion: "Ideal para maestros que inician", activo: true, orden: 1,
+    id: "basico",
+    nombre: "Básico",
+    precio_centavos: 9900,
+    precio_centavos_anual: 99000,
+    moneda: "mxn",
+    intervalo: "month",
+    dias_prueba: 15,
+    stripe_price_id: null,
+    stripe_price_id_anual: null,
+    descripcion: "Ideal para maestros que inician",
+    activo: true,
+    orden: 1,
     caracteristicas: ["Hasta 35 alumnos", "Registro de asistencia", "Planeaciones básicas", "Reportes simples"],
   },
   {
-    id: "profesional", nombre: "Profesional", precio_centavos: 19900, moneda: "mxn",
-    intervalo: "month", dias_prueba: 15, stripe_price_id: null,
-    descripcion: "Para maestros avanzados", activo: true, orden: 2,
+    id: "profesional",
+    nombre: "Profesional",
+    precio_centavos: 19900,
+    precio_centavos_anual: 199000,
+    moneda: "mxn",
+    intervalo: "month",
+    dias_prueba: 15,
+    stripe_price_id: null,
+    stripe_price_id_anual: null,
+    descripcion: "Para maestros avanzados",
+    activo: true,
+    orden: 2,
     caracteristicas: ["Alumnos ilimitados", "Herramientas IA", "Generación de imágenes", "Planeaciones IA", "Reportes avanzados"],
   },
   {
-    id: "institucional", nombre: "Institucional", precio_centavos: 49900, moneda: "mxn",
-    intervalo: "month", dias_prueba: 15, stripe_price_id: null,
-    descripcion: "Para escuelas", activo: true, orden: 3,
+    id: "institucional",
+    nombre: "Institucional",
+    precio_centavos: 49900,
+    precio_centavos_anual: 499000,
+    moneda: "mxn",
+    intervalo: "month",
+    dias_prueba: 15,
+    stripe_price_id: null,
+    stripe_price_id_anual: null,
+    descripcion: "Para escuelas",
+    activo: true,
+    orden: 3,
     caracteristicas: ["Múltiples maestros", "Panel de director", "Reportes institucionales", "Soporte 24/7"],
   },
 ];
@@ -95,6 +128,9 @@ function formatDateShort(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("es-MX", { year: "numeric", month: "short", day: "numeric" });
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPONENTE PRINCIPAL
+   ═══════════════════════════════════════════════════════════════════════════ */
 export default function SuscripcionSection() {
   const [billingInterval, setBillingInterval] = useState<"month" | "year">("month");
   const [isLoading, setIsLoading] = useState<string | null>(null);
@@ -130,8 +166,12 @@ export default function SuscripcionSection() {
       let loadedPlans = FALLBACK_PLANS;
       if (plansRes && plansRes.ok) {
         const plansJson = await plansRes.json();
-        if (plansJson.success && plansJson.data?.length > 0) {
-          loadedPlans = plansJson.data;
+        if (plansJson.success && Array.isArray(plansJson.data) && plansJson.data.length > 0) {
+          loadedPlans = plansJson.data.map((p: any) => ({
+            ...p,
+            precio_centavos_anual: p.precio_centavos_anual ?? p.precio_anual ? p.precio_anual * 100 : Math.round(p.precio_centavos * 10),
+            stripe_price_id_anual: p.stripe_price_id_anual ?? null,
+          }));
         }
       }
       setPlans(loadedPlans);
@@ -166,28 +206,32 @@ export default function SuscripcionSection() {
     checkStripeConfig();
   }, [loadData, checkStripeConfig]);
 
+  /* ── Checkout unificado: usa price_id (estándar Stripe) ─────────────── */
   const handleSubscribe = async (plan: DbPlan) => {
     if (!userId) {
       toast.error("Debes iniciar sesión para suscribirte.", { duration: 5000 });
       return;
     }
 
-    setIsLoading(plan.id);
-    const annualPrice = Math.round(plan.precio_centavos * 10);
-    const unitAmount = billingInterval === "year" ? annualPrice : plan.precio_centavos;
+    const priceId = billingInterval === "year"
+      ? (plan.stripe_price_id_anual || plan.stripe_price_id)
+      : plan.stripe_price_id;
 
+    if (!priceId) {
+      toast.error("Este plan no tiene configurado un precio de Stripe. Contacta soporte.", { duration: 6000 });
+      return;
+    }
+
+    setIsLoading(plan.id);
     try {
       const res = await fetch("/next_api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          productName: `PlaneaDocente ${plan.nombre}`,
-          amount: unitAmount,
-          currency: plan.moneda ?? "mxn",
-          quantity: 1,
-          interval: billingInterval,
-          planId: plan.id,
-          userId: userId,
+          price_id: priceId,
+          user_id: userId,
+          billing: billingInterval,
+          plan_id: plan.id,
         }),
       });
 
@@ -203,8 +247,8 @@ export default function SuscripcionSection() {
         return;
       }
 
-      if (data?.data?.url) {
-        window.location.href = data.data.url;
+      if (data?.url) {
+        window.location.href = data.url;
       } else {
         toast.error("No se pudo obtener la URL de pago.");
       }
@@ -297,6 +341,11 @@ export default function SuscripcionSection() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {plans.map((plan, i) => {
             const meta = getPlanMeta(plan.nombre);
+            const priceId = billingInterval === "year"
+              ? (plan.stripe_price_id_anual || plan.stripe_price_id)
+              : plan.stripe_price_id;
+            const canSubscribe = !!priceId && !!userId;
+
             return (
               <PlanCard
                 key={plan.id}
@@ -307,7 +356,18 @@ export default function SuscripcionSection() {
                 isLoading={isLoading === plan.id}
                 isActive={activeSub?.plan?.id === plan.id}
                 isLoggedIn={!!userId}
-                onSubscribe={() => setShowConfirmModal(plan)}
+                canSubscribe={canSubscribe}
+                onSubscribe={() => {
+                  if (!userId) {
+                    toast.error("Inicia sesión para suscribirte");
+                    return;
+                  }
+                  if (!priceId) {
+                    toast.error("Plan no configurado para pagos. Contacta soporte.");
+                    return;
+                  }
+                  setShowConfirmModal(plan);
+                }}
               />
             );
           })}
@@ -345,7 +405,7 @@ export default function SuscripcionSection() {
   );
 }
 
-/* ──────────────────────────── SUB-COMPONENTES ──────────────────────────── */
+/* ═══════════════════════════ SUB-COMPONENTES ═══════════════════════════ */
 
 function LoginRequiredBanner() {
   return (
@@ -427,7 +487,6 @@ function ActiveSubscriptionBanner({ activeSub }: { activeSub: ActiveSubscription
   );
 }
 
-/* ═════════════════════ SUGERENCIA: SubscriptionManager ═════════════════════ */
 function SubscriptionManager({
   activeSub,
   onCancel,
@@ -520,7 +579,7 @@ function ConfirmSubscriptionModal({
   onConfirm: () => void;
   onClose: () => void;
 }) {
-  const annualPrice = Math.round(plan.precio_centavos * 10);
+  const annualPrice = plan.precio_centavos_anual ?? Math.round(plan.precio_centavos * 10);
   const price = billingInterval === "year" ? annualPrice : plan.precio_centavos;
   const meta = getPlanMeta(plan.nombre);
   const Icon = meta.icon;
@@ -684,6 +743,7 @@ function PlanCard({
   isLoading,
   isActive,
   isLoggedIn,
+  canSubscribe,
   onSubscribe,
 }: {
   plan: DbPlan;
@@ -693,10 +753,11 @@ function PlanCard({
   isLoading: boolean;
   isActive: boolean;
   isLoggedIn: boolean;
+  canSubscribe: boolean;
   onSubscribe: () => void;
 }) {
   const Icon = meta.icon;
-  const annualPrice = Math.round(plan.precio_centavos * 10);
+  const annualPrice = plan.precio_centavos_anual ?? Math.round(plan.precio_centavos * 10);
   const displayPrice = billingInterval === "year" ? annualPrice : plan.precio_centavos;
   const monthlyEquivalent = billingInterval === "year" ? Math.round(annualPrice / 12) : plan.precio_centavos;
 
@@ -762,7 +823,7 @@ function PlanCard({
 
           <Button
             onClick={onSubscribe}
-            disabled={isLoading || isActive || !isLoggedIn}
+            disabled={isLoading || isActive || !canSubscribe}
             className={`w-full gap-2 ${
               meta.popular
                 ? "bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white"
@@ -779,13 +840,25 @@ function PlanCard({
               <>
                 <Check className="w-4 h-4" /> Plan actual
               </>
+            ) : !isLoggedIn ? (
+              <>
+                <LogIn className="w-4 h-4" /> Inicia sesión
+              </>
+            ) : !canSubscribe ? (
+              <>
+                <AlertCircle className="w-4 h-4" /> No disponible
+              </>
             ) : (
               <>
-                <CreditCard className="w-4 h-4" />
-                {isLoggedIn ? "Suscribirme" : "Inicia sesión"}
+                <CreditCard className="w-4 h-4" /> Suscribirme
               </>
             )}
           </Button>
+          {!canSubscribe && isLoggedIn && (
+            <p className="text-xs text-center text-amber-600 mt-2">
+              Plan pendiente de configuración de pago.
+            </p>
+          )}
         </CardContent>
       </Card>
     </motion.div>
@@ -907,10 +980,7 @@ function PaymentHistoryTable({ userId }: { userId: string | null }) {
         }
       })
       .catch(() => {
-        // Fallback demo data
-        setPayments([
-          { id: "pi_demo1", fecha: new Date().toISOString(), monto_centavos: 19900, moneda: "mxn", estado: "succeeded", descripcion: "Plan Profesional - Mensual", metodo: "**** 4242" },
-        ]);
+        setPayments([]);
       })
       .finally(() => setLoading(false));
   }, [userId]);
@@ -1008,6 +1078,10 @@ function StripeConfigModal({ onClose }: { onClose: () => void }) {
           next_public_stripe_url: publicUrl,
         }),
       });
+      if (res.status === 404) {
+        toast.error("El endpoint /api/admin/stripe-config no existe. Configura las variables manualmente en Vercel.");
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         toast.success("Configuración de Stripe guardada correctamente.");

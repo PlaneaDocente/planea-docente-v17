@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -12,94 +12,126 @@ import {
   ArrowRight,
   Crown,
   AlertTriangle,
+  LogIn,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   INTERFAZ UNIFICADA — Misma estructura que SuscripcionSection.tsx
+   para compatibilidad total con /api/subscription-plans
+   ═══════════════════════════════════════════════════════════════════════════ */
 interface SubscriptionPlan {
   id: string;
   nombre: string;
   descripcion: string | null;
-  precio_mensual: number;
-  precio_anual: number | null;
+  precio_centavos: number;
+  precio_centavos_anual?: number | null;
   caracteristicas: string[];
   activo: boolean;
   orden: number;
   stripe_price_id: string | null;
-  stripe_price_id_anual: string | null;
+  stripe_price_id_anual?: string | null;
+}
+
+interface CurrentSubscription {
+  plan_id: string;
+  estado: string;
 }
 
 type LoadingState = "idle" | "loading" | "error" | "ready";
 type CheckoutState = "idle" | "redirecting" | "error";
 
+function formatPrice(cents: number): string {
+  return `$${(cents / 100).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPONENTE PRINCIPAL
+   ═══════════════════════════════════════════════════════════════════════════ */
 export default function SuscripcionPage() {
   const router = useRouter();
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loadState, setLoadState] = useState<LoadingState>("idle");
   const [checkoutState, setCheckoutState] = useState<CheckoutState>("idle");
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
-  const [currentSubscription, setCurrentSubscription] = useState<{
-    plan_id: string;
-    estado: string;
-  } | null>(null);
+  const [currentSubscription, setCurrentSubscription] = useState<CurrentSubscription | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // ── Cargar planes y suscripción actual ─────────────────────────────────────
-  useEffect(() => {
-    const loadData = async () => {
-      setLoadState("loading");
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const userId = sessionData?.session?.user?.id;
+  /* ── Cargar planes y suscripción actual ───────────────────────────────── */
+  const loadData = useCallback(async () => {
+    setLoadState("loading");
+    setErrorMsg(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData?.session?.user?.id ?? null;
+      setUserId(uid);
 
-        // 1. Cargar planes activos
-        const res = await fetch("/api/subscription-plans");
-        const plansJson = await res.json();
+      const res = await fetch("/api/subscription-plans");
+      const plansJson = await res.json();
 
-        if (!res.ok || !plansJson.success) {
-          throw new Error(plansJson.error || "Error al cargar planes");
-        }
-
-        setPlans(plansJson.data ?? []);
-
-        // 2. Si hay usuario logueado, verificar suscripción actual
-        if (userId) {
-          const subRes = await fetch(`/api/user-subscription?user_id=${userId}`);
-          const subJson = await subRes.json();
-          if (subRes.ok && subJson.success && subJson.data?.subscription) {
-            setCurrentSubscription(subJson.data.subscription);
-          }
-        }
-
-        setLoadState("ready");
-      } catch (err) {
-        console.error("[SuscripcionPage] Load error:", err);
-        setErrorMsg(err instanceof Error ? err.message : "Error desconocido");
-        setLoadState("error");
+      if (!res.ok || !plansJson.success) {
+        throw new Error(plansJson.error || "Error al cargar planes");
       }
-    };
 
-    loadData();
+      // Normalizar datos: asegurar que todos los planes tengan campos compatibles
+      const normalizedPlans: SubscriptionPlan[] = (plansJson.data ?? []).map((p: any) => ({
+        ...p,
+        precio_centavos: p.precio_centavos ?? (p.precio_mensual ? p.precio_mensual * 100 : 0),
+        precio_centavos_anual: p.precio_centavos_anual ?? (p.precio_anual ? p.precio_anual * 100 : null),
+        stripe_price_id_anual: p.stripe_price_id_anual ?? null,
+        caracteristicas: p.caracteristicas ?? [],
+      }));
+
+      setPlans(normalizedPlans);
+
+      if (uid) {
+        const subRes = await fetch(`/api/user-subscription?user_id=${uid}`);
+        const subJson = await subRes.json();
+        if (subRes.ok && subJson.success && subJson.data?.subscription) {
+          setCurrentSubscription({
+            plan_id: subJson.data.subscription.plan_id ?? subJson.data.subscription.planId,
+            estado: subJson.data.subscription.estado,
+          });
+        }
+      }
+
+      setLoadState("ready");
+    } catch (err) {
+      console.error("[SuscripcionPage] Load error:", err);
+      setErrorMsg(err instanceof Error ? err.message : "Error desconocido");
+      setLoadState("error");
+    }
   }, []);
 
-  // ── Iniciar checkout de Stripe ─────────────────────────────────────────────
-  const handleSubscribe = async (plan: SubscriptionPlan, billing: "monthly" | "annual" = "monthly") => {
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  /* ── Checkout unificado (mismo payload que SuscripcionSection.tsx) ────── */
+  const handleSubscribe = useCallback(async (plan: SubscriptionPlan, billing: "monthly" | "annual" = "monthly") => {
     setCheckoutState("redirecting");
     setActivePlanId(plan.id);
     setErrorMsg(null);
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData?.session?.user?.id;
+      const uid = sessionData?.session?.user?.id;
 
-      if (!userId) {
+      if (!uid) {
+        toast.error("Debes iniciar sesión para suscribirte");
         router.push("/login?redirect=/suscripcion");
         return;
       }
 
-      const priceId = billing === "annual" ? plan.stripe_price_id_anual : plan.stripe_price_id;
+      const priceId = billing === "annual"
+        ? (plan.stripe_price_id_anual || plan.stripe_price_id)
+        : plan.stripe_price_id;
 
       if (!priceId) {
         throw new Error("Este plan no tiene configurado un precio de Stripe. Contacta soporte.");
@@ -110,8 +142,9 @@ export default function SuscripcionPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           price_id: priceId,
-          user_id: userId,
-          billing,
+          user_id: uid,
+          billing: billing === "annual" ? "year" : "month",
+          plan_id: plan.id,
         }),
       });
 
@@ -121,17 +154,17 @@ export default function SuscripcionPage() {
         throw new Error(json.error || "Error al iniciar el pago");
       }
 
-      // Redirigir a Stripe Checkout
       window.location.href = json.url;
     } catch (err) {
       console.error("[SuscripcionPage] Checkout error:", err);
       setErrorMsg(err instanceof Error ? err.message : "Error al iniciar el pago");
       setCheckoutState("error");
       setActivePlanId(null);
+      toast.error(err instanceof Error ? err.message : "Error al iniciar el pago");
     }
-  };
+  }, [router]);
 
-  // ── Renderizado de estados ─────────────────────────────────────────────────
+  /* ── Estados de carga ─────────────────────────────────────────────────── */
   if (loadState === "loading") {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex items-center justify-center p-4">
@@ -151,8 +184,8 @@ export default function SuscripcionPage() {
             <AlertTriangle className="w-12 h-12 text-red-500 mx-auto" />
             <h2 className="text-xl font-bold text-red-700 dark:text-red-300">Error al cargar planes</h2>
             <p className="text-muted-foreground text-sm">{errorMsg}</p>
-            <Button onClick={() => window.location.reload()} variant="outline" className="w-full">
-              Reintentar
+            <Button onClick={loadData} variant="outline" className="w-full gap-2">
+              <RefreshCw className="w-4 h-4" /> Reintentar
             </Button>
           </CardContent>
         </Card>
@@ -160,7 +193,7 @@ export default function SuscripcionPage() {
     );
   }
 
-  // ── Render principal ───────────────────────────────────────────────────────
+  /* ── Render principal ─────────────────────────────────────────────────── */
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 py-12 px-4">
       <div className="max-w-6xl mx-auto space-y-10">
@@ -184,6 +217,27 @@ export default function SuscripcionPage() {
             </p>
           </motion.div>
         </div>
+
+        {/* Banner login requerido */}
+        {!userId && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-2xl mx-auto"
+          >
+            <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/30">
+              <CardContent className="py-4 flex items-center gap-3 justify-center">
+                <LogIn className="w-5 h-5 text-blue-600" />
+                <p className="text-sm text-blue-800 dark:text-blue-300">
+                  <span className="font-semibold">Inicia sesión</span> para suscribirte y comenzar tu prueba gratuita.
+                </p>
+                <Button size="sm" variant="outline" onClick={() => router.push("/login?redirect=/suscripcion")}>
+                  Entrar
+                </Button>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         {/* Banner si ya tiene suscripción */}
         {currentSubscription && (
@@ -231,6 +285,10 @@ export default function SuscripcionPage() {
             const isPopular = plan.nombre.toLowerCase().includes("profesional");
             const isInstitutional = plan.nombre.toLowerCase().includes("institucional");
             const isCurrent = currentSubscription?.plan_id === plan.id;
+            const monthlyPrice = plan.precio_centavos;
+            const annualPrice = plan.precio_centavos_anual ?? Math.round(plan.precio_centavos * 10);
+            const hasMonthlyPrice = !!plan.stripe_price_id;
+            const hasAnnualPrice = !!(plan.stripe_price_id_anual || plan.stripe_price_id);
 
             return (
               <motion.div
@@ -272,37 +330,37 @@ export default function SuscripcionPage() {
                   </CardHeader>
 
                   <CardContent className="flex-1 flex flex-col space-y-6">
-                    {/* Precio */}
+                    {/* Precio mensual */}
                     <div className="text-center space-y-1">
                       <div className="flex items-baseline justify-center gap-1">
                         <span className="text-4xl font-extrabold tracking-tight">
-                          ${plan.precio_mensual}
+                          {formatPrice(monthlyPrice)}
                         </span>
                         <span className="text-muted-foreground">MXN/mes</span>
                       </div>
-                      {plan.precio_anual && (
+                      {annualPrice > 0 && (
                         <p className="text-xs text-muted-foreground">
-                          o ${plan.precio_anual} MXN/año
+                          o {formatPrice(annualPrice)} MXN/año
                         </p>
                       )}
                     </div>
 
                     {/* Características */}
                     <ul className="space-y-3 flex-1">
-                      {(plan.caracteristicas ?? []).map((feature, i) => (
+                      {plan.caracteristicas.map((feature, i) => (
                         <li key={i} className="flex items-start gap-2 text-sm">
                           <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
                           <span className="text-slate-700 dark:text-slate-300">{feature}</span>
                         </li>
                       ))}
-                      {(!plan.caracteristicas || plan.caracteristicas.length === 0) && (
+                      {plan.caracteristicas.length === 0 && (
                         <li className="text-sm text-muted-foreground italic">
                           Características no configuradas
                         </li>
                       )}
                     </ul>
 
-                    {/* Botón */}
+                    {/* Botones de acción */}
                     <div className="space-y-2">
                       {isCurrent ? (
                         <Button
@@ -318,9 +376,7 @@ export default function SuscripcionPage() {
                             onClick={() => handleSubscribe(plan, "monthly")}
                             disabled={checkoutState === "redirecting" && activePlanId === plan.id}
                             className={`w-full gap-2 ${
-                              isPopular
-                                ? "bg-primary hover:bg-primary/90"
-                                : ""
+                              isPopular ? "bg-primary hover:bg-primary/90" : ""
                             }`}
                           >
                             {checkoutState === "redirecting" && activePlanId === plan.id ? (
@@ -335,7 +391,7 @@ export default function SuscripcionPage() {
                               </>
                             )}
                           </Button>
-                          {plan.precio_anual && plan.stripe_price_id_anual && (
+                          {hasAnnualPrice && (
                             <Button
                               onClick={() => handleSubscribe(plan, "annual")}
                               disabled={checkoutState === "redirecting" && activePlanId === plan.id}
@@ -346,6 +402,11 @@ export default function SuscripcionPage() {
                             </Button>
                           )}
                         </>
+                      )}
+                      {!hasMonthlyPrice && (
+                        <p className="text-xs text-center text-amber-600">
+                          Plan pendiente de configuración de pago.
+                        </p>
                       )}
                     </div>
                   </CardContent>
