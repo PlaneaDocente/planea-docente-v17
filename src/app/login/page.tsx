@@ -2,21 +2,42 @@ import { Suspense } from "react";
 import LoginPageClient from "@/components/auth/LoginPageClient";
 
 export const metadata = {
-  title: "Iniciar Sesión – PlaneaDocente",
+  title: "Iniciar Sesión – PlaneaDocente V17 | Sistema Educativo NEM",
   description:
-    "Accede a tu cuenta de PlaneaDocente. Gestiona alumnos, asistencia, planeaciones y más con IA.",
+    "Accede a tu cuenta de PlaneaDocente. Gestiona alumnos, asistencia, planeaciones didácticas, evaluaciones y más con herramientas de IA alineadas a la Nueva Escuela Mexicana (NEM).",
+  keywords: [
+    "PlaneaDocente",
+    "login maestro",
+    "sistema educativo",
+    "NEM",
+    "Nueva Escuela Mexicana",
+    "planeación didáctica",
+    "gestión escolar",
+    "asistencia alumnos",
+    "evaluación educativa",
+  ],
   openGraph: {
-    title: "Iniciar Sesión – PlaneaDocente",
-    description: "Accede a tu panel de maestro en PlaneaDocente.",
+    title: "Iniciar Sesión – PlaneaDocente V17",
+    description:
+      "Accede a tu panel de maestro en PlaneaDocente. Planeación educativa con IA para la NEM.",
     url: "https://planeadocente.com/login",
     siteName: "PlaneaDocente",
     locale: "es_MX",
     type: "website",
+    images: [
+      {
+        url: "https://planeadocente.com/og-image.jpg",
+        width: 1200,
+        height: 630,
+        alt: "PlaneaDocente - Sistema Educativo NEM",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Iniciar Sesión – PlaneaDocente",
+    title: "Iniciar Sesión – PlaneaDocente V17",
     description: "Accede a tu panel de maestro en PlaneaDocente.",
+    images: ["https://planeadocente.com/og-image.jpg"],
   },
   alternates: {
     canonical: "https://planeadocente.com/login",

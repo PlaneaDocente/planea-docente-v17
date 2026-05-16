@@ -7,10 +7,10 @@ import { createClient } from "@supabase/supabase-js";
  *   NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
  *   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
  *
- * ⚠️ Este cliente se ejecuta SOLO en el navegador. No uses en Server Components
- * ni en API Routes (usa server.ts para eso).
+ * ⚠️ Este cliente se ejecuta SOLO en el navegador.
  *
- * El cliente incluye auth, realtime, storage y database.
+ * MEJORA CRÍTICA: Sincroniza la sesión tanto en localStorage como en cookies,
+ * para que el middleware de Next.js pueda detectar la sesión server-side.
  */
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -29,8 +29,6 @@ if (!supabaseAnonKey) {
     "Agrega la clave anónima de Supabase en .env.local"
   );
 }
-
-// Validación básica de formato de URL
 if (!supabaseUrl.startsWith("https://")) {
   throw new Error(
     "[supabase/client] NEXT_PUBLIC_SUPABASE_URL debe comenzar con https://"
@@ -38,19 +36,54 @@ if (!supabaseUrl.startsWith("https://")) {
 }
 
 /**
+ * Storage personalizado que escribe en localStorage Y en cookies.
+ * Esto permite que el middleware de Next.js lea la sesión desde cookies
+ * mientras el cliente la mantiene en localStorage.
+ */
+const cookieStorage = {
+  getItem: (key: string): string | null => {
+    if (typeof window === "undefined") return null;
+    // 1. Intentar localStorage primero (más rápido)
+    const localValue = localStorage.getItem(key);
+    if (localValue) return localValue;
+    // 2. Fallback a cookie (para compatibilidad con SSR/middleware)
+    const match = document.cookie.match(new RegExp("(^| )" + key.replace(/[-[\]{}()*+?.,\^$|#\s]/g, "\$&") + "=([^;]+)"));
+    return match ? decodeURIComponent(match[2]) : null;
+  },
+  setItem: (key: string, value: string): void => {
+    if (typeof window === "undefined") return;
+    // 1. Guardar en localStorage (persistencia principal)
+    localStorage.setItem(key, value);
+    // 2. Sincronizar en cookie (para que el middleware la lea)
+    //    Max-age: 30 días, SameSite=Lax, Secure solo en HTTPS
+    const secureFlag = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${key}=${encodeURIComponent(value)}; path=/; max-age=2592000; SameSite=Lax${secureFlag}`;
+  },
+  removeItem: (key: string): void => {
+    if (typeof window === "undefined") return;
+    // 1. Borrar de localStorage
+    localStorage.removeItem(key);
+    // 2. Borrar cookie
+    document.cookie = `${key}=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT`;
+  },
+};
+
+/**
  * Cliente Supabase global para el navegador.
  *
  * Configuración:
- * - auth: persistencia en localStorage (sesión se mantiene entre recargas)
+ * - auth: persistencia en localStorage + cookies (dual storage)
+ * - detectSessionInUrl: true (procesa automáticamente ?code= de OAuth)
  * - realtime: reconexión automática
- * - db: sin schema explícito (usa "public" por defecto)
  */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
+    storage: cookieStorage,
     storageKey: "sb-planeadocente-auth-token",
+    flowType: "pkce", // ⭐ CRÍTICO: PKCE evita el "bounce tracking" de Chrome con OAuth
   },
   realtime: {
     params: {
@@ -66,7 +99,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 /**
  * Helper para verificar la conectividad con Supabase.
- * Útil para diagnosticar problemas de red o configuración.
  */
 export async function checkSupabaseHealth(): Promise<{
   ok: boolean;
@@ -75,7 +107,6 @@ export async function checkSupabaseHealth(): Promise<{
   try {
     const { error } = await supabase.from("subscription_plans").select("id").limit(1);
     if (error && error.code !== "PGRST116") {
-      // PGRST116 = tabla no existe (aceptable si aún no hay tablas)
       return { ok: false, error: error.message };
     }
     return { ok: true };

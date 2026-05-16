@@ -2,22 +2,44 @@ import { Suspense } from "react";
 import RegisterPageClient from "@/components/auth/RegisterPageClient";
 
 export const metadata = {
-  title: "Crear Cuenta Gratis – PlaneaDocente",
+  title: "Crear Cuenta Gratis – PlaneaDocente V17 | Prueba 15 días",
   description:
-    "Regístrate gratis en PlaneaDocente. 15 días de prueba en el plan Profesional. Sin tarjeta de crédito. Gestiona alumnos, asistencia y planeaciones con IA.",
+    "Regístrate gratis en PlaneaDocente. 15 días de prueba en el plan Profesional. Sin tarjeta de crédito. Gestiona alumnos, asistencia, planeaciones didácticas y evaluaciones con IA alineadas a la Nueva Escuela Mexicana (NEM).",
+  keywords: [
+    "PlaneaDocente",
+    "registro maestro",
+    "cuenta gratis",
+    "prueba gratuita",
+    "NEM",
+    "Nueva Escuela Mexicana",
+    "planeación didáctica",
+    "gestión escolar",
+    "asistencia alumnos",
+    "evaluación educativa",
+    "herramientas IA maestros",
+  ],
   openGraph: {
-    title: "Crear Cuenta Gratis – PlaneaDocente",
+    title: "Crear Cuenta Gratis – PlaneaDocente V17",
     description:
-      "15 días de prueba gratis en el plan Profesional. Sin tarjeta de crédito.",
+      "15 días de prueba gratis en el plan Profesional. Sin tarjeta de crédito. Sistema educativo NEM.",
     url: "https://planeadocente.com/registro",
     siteName: "PlaneaDocente",
     locale: "es_MX",
     type: "website",
+    images: [
+      {
+        url: "https://planeadocente.com/og-image.jpg",
+        width: 1200,
+        height: 630,
+        alt: "PlaneaDocente - Registro gratuito para maestros",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Crear Cuenta Gratis – PlaneaDocente",
+    title: "Crear Cuenta Gratis – PlaneaDocente V17",
     description: "15 días de prueba gratis. Sin tarjeta de crédito.",
+    images: ["https://planeadocente.com/og-image.jpg"],
   },
   alternates: {
     canonical: "https://planeadocente.com/registro",

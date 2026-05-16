@@ -12,6 +12,7 @@ import {
   Chrome,
   ArrowLeft,
   AlertCircle,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,10 +22,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-/**
- * Regex simple pero efectiva para validar formato de email.
- */
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function getSiteUrl(): string {
+  if (typeof window !== "undefined") {
+    return process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+  }
+  return "https://planeadocente.com";
+}
 
 export default function LoginPageClient() {
   const router = useRouter();
@@ -36,84 +41,87 @@ export default function LoginPageClient() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isResendingEmail, setIsResendingEmail] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [emailNotConfirmed, setEmailNotConfirmed] = useState(false);
 
-  /**
-   * Al montar: si ya hay sesión activa, redirigir directamente.
-   * Evita mostrar el login a usuarios que ya están autenticados.
-   */
   useEffect(() => {
     let mounted = true;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!mounted) return;
       if (session?.user) {
-        // Usuario ya logueado: verificar suscripción y redirigir
-        checkSubscriptionAndRedirect(session.user.id);
+        handlePostLoginRedirect(session.user.id);
       } else {
         setIsCheckingSession(false);
       }
     });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (!mounted) return;
+        if (event === "SIGNED_IN" && session?.user) {
+          toast.success("¡Sesión iniciada correctamente!");
+          await handlePostLoginRedirect(session.user.id);
+        }
+        if (event === "USER_UPDATED" && session?.user) {
+          toast.success("¡Cuenta verificada! Redirigiendo...");
+          await handlePostLoginRedirect(session.user.id);
+        }
+      }
+    );
+
     return () => {
       mounted = false;
+      authListener?.subscription?.unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /**
-   * Consulta la suscripción del usuario y redirige:
-   * - Si tiene suscripción activa/trialing → /dashboard (o redirectAfterLogin)
-   * - Si no tiene suscripción o está vencida → /suscripcion
-   * - Si la API falla con 404/500 → /dashboard (fallback seguro, no forzar a pagar)
+   * REDIRECCIÓN POST-LOGIN MEJORADA:
+   * - Si tiene suscripción activa/trialing → /dashboard
+   * - Si NO tiene suscripción → /dashboard con query param para mostrar banner
+   * - NUNCA bloquear al usuario en /suscripcion solo por no tener suscripción
    */
-  const checkSubscriptionAndRedirect = useCallback(
+  const handlePostLoginRedirect = useCallback(
     async (userId: string) => {
       try {
-        const res = await fetch(`/api/user-subscription?user_id=${encodeURIComponent(userId)}`, {
-          cache: "no-store",
-          headers: { "Accept": "application/json" },
-        });
+        const res = await fetch(
+          `/api/user-subscription?user_id=${encodeURIComponent(userId)}`,
+          { cache: "no-store", headers: { Accept: "application/json" } }
+        );
 
-        // Si la API no responde OK, no asumimos que no hay suscripción.
-        // Fallback seguro: mandar al dashboard y que el middleware decida.
         if (!res.ok) {
-          console.warn("[Login] Subscription API error, status:", res.status);
-          toast.info("Bienvenido de vuelta.");
-          router.push(redirectAfterLogin);
+          console.warn("[Login] Subscription API error:", res.status);
+          router.push("/dashboard?welcome=back");
           return;
         }
 
         const json = await res.json();
-
-        if (!json.success) {
-          console.warn("[Login] Subscription check unsuccessful:", json.error);
-          router.push(redirectAfterLogin);
-          return;
-        }
-
         const sub = json.data?.subscription;
-        const hasActivePlan =
-          sub && (sub.estado === "active" || sub.estado === "trialing");
+        const hasActivePlan = sub && (sub.estado === "active" || sub.estado === "trialing");
 
         if (hasActivePlan) {
-          toast.success("¡Bienvenido de vuelta!");
-          router.push(redirectAfterLogin);
+          router.push("/dashboard?welcome=back");
         } else {
-          toast.info("Activa un plan para comenzar a usar PlaneaDocente.");
-          router.push("/suscripcion");
+          // ⭐ CAMBIO CRÍTICO: No bloquear en /suscripcion. Ir al dashboard
+          // con un flag que el dashboard puede leer para mostrar banner.
+          toast.info("Bienvenido. Activa un plan para desbloquear todas las funciones.");
+          router.push("/dashboard?needs_subscription=true");
         }
       } catch (err) {
         console.error("[Login] Error checking subscription:", err);
-        // Fallback seguro: ir al dashboard, nunca forzar a pagar por un error de red
-        toast.success("¡Bienvenido de vuelta!");
-        router.push(redirectAfterLogin);
+        router.push("/dashboard?welcome=back");
       }
     },
-    [router, redirectAfterLogin]
+    [router]
   );
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setEmailNotConfirmed(false);
 
     if (!email.trim() || !password) {
       toast.error("Por favor ingresa tu email y contraseña.");
@@ -138,8 +146,12 @@ export default function LoginPageClient() {
         let message = error.message;
         if (error.message.includes("Invalid login credentials")) {
           message = "Email o contraseña incorrectos.";
-        } else if (error.message.includes("Email not confirmed")) {
+        } else if (
+          error.message.includes("Email not confirmed") ||
+          error.message.includes("not confirmed")
+        ) {
           message = "Tu email aún no ha sido confirmado. Revisa tu bandeja de entrada.";
+          setEmailNotConfirmed(true);
         } else if (error.message.includes("rate limit")) {
           message = "Demasiados intentos. Por favor espera unos minutos.";
         }
@@ -151,9 +163,8 @@ export default function LoginPageClient() {
       setFailedAttempts(0);
       const userId = data.user?.id;
       if (userId) {
-        await checkSubscriptionAndRedirect(userId);
+        await handlePostLoginRedirect(userId);
       } else {
-        toast.success("¡Bienvenido de vuelta!");
         router.push("/dashboard");
       }
     } catch (err) {
@@ -164,13 +175,37 @@ export default function LoginPageClient() {
     }
   };
 
+  const handleResendConfirmation = async () => {
+    if (!email.trim() || !EMAIL_REGEX.test(email.trim())) {
+      toast.error("Ingresa un email válido para reenviar la confirmación.");
+      return;
+    }
+    setIsResendingEmail(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+      });
+      if (error) {
+        toast.error("Error al reenviar: " + error.message);
+      } else {
+        toast.success("¡Correo de confirmación reenviado! Revisa tu bandeja de entrada.");
+        setEmailNotConfirmed(false);
+      }
+    } catch (err) {
+      toast.error("Error inesperado al reenviar.");
+    } finally {
+      setIsResendingEmail(false);
+    }
+  };
+
   const handleGoogleLogin = async () => {
     setIsGoogleLoading(true);
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${getSiteUrl()}/auth/callback`,
           queryParams: {
             access_type: "offline",
             prompt: "consent",
@@ -189,7 +224,6 @@ export default function LoginPageClient() {
     }
   };
 
-  // Mientras verifica sesión existente, mostrar skeleton para evitar flash de login
   if (isCheckingSession) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-violet-50 to-indigo-100 dark:from-violet-950 dark:to-indigo-900 flex items-center justify-center p-4">
@@ -262,7 +296,10 @@ export default function LoginPageClient() {
                   type="email"
                   placeholder="maestro@escuela.edu.mx"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setEmailNotConfirmed(false);
+                  }}
                   className="pl-10"
                   autoComplete="email"
                   inputMode="email"
@@ -285,7 +322,6 @@ export default function LoginPageClient() {
                   className="pl-10 pr-10"
                   autoComplete="current-password"
                   required
-                  aria-describedby={failedAttempts >= 3 ? "login-warning" : undefined}
                 />
                 <button
                   type="button"
@@ -294,18 +330,39 @@ export default function LoginPageClient() {
                   tabIndex={-1}
                   aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
                 >
-                  {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
-            {failedAttempts >= 3 && (
+            {emailNotConfirmed && (
               <div
-                id="login-warning"
+                className="flex flex-col gap-2 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-700 dark:text-amber-300"
+                role="alert"
+              >
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>
+                    Tu email aún no ha sido confirmado. Revisa tu bandeja de
+                    entrada (incluyendo spam).
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResendConfirmation}
+                  disabled={isResendingEmail}
+                  className="w-full gap-2 text-amber-700 border-amber-300 hover:bg-amber-100"
+                >
+                  {isResendingEmail ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                  Reenviar correo de confirmación
+                </Button>
+              </div>
+            )}
+
+            {failedAttempts >= 3 && !emailNotConfirmed && (
+              <div
                 className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-700 dark:text-amber-300"
                 role="alert"
               >
@@ -322,9 +379,7 @@ export default function LoginPageClient() {
               className="w-full h-11 font-semibold"
               disabled={isLoading || isGoogleLoading}
             >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : null}
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Iniciar Sesión
             </Button>
           </form>
@@ -332,10 +387,7 @@ export default function LoginPageClient() {
           <div className="mt-6 text-center space-y-3">
             <p className="text-sm text-muted-foreground">
               ¿No tienes cuenta?{" "}
-              <Link
-                href="/registro"
-                className="text-primary font-semibold hover:underline"
-              >
+              <Link href="/registro" className="text-primary font-semibold hover:underline">
                 Regístrate gratis
               </Link>
             </p>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   GraduationCap,
@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Gift,
   AlertCircle,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,14 @@ import Link from "next/link";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Sanitiza texto para mostrar en UI y evitar XSS básico */
+function getSiteUrl(): string {
+  if (typeof window !== "undefined") {
+    return process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+  }
+  return "https://planeadocente.com";
+}
+
+/** Sanitiza texto para evitar XSS básico */
 function sanitizeText(input: string): string {
   return input
     .replace(/&/g, "&amp;")
@@ -41,7 +49,7 @@ export default function RegisterPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawReferralCode = searchParams?.get("ref") ?? "";
-  const referralCode = sanitizeText(rawReferralCode.slice(0, 50)); // limitar longitud
+  const referralCode = sanitizeText(rawReferralCode.slice(0, 50));
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -53,12 +61,16 @@ export default function RegisterPageClient() {
   const [trialCreated, setTrialCreated] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false);
 
   /**
-   * Si ya hay sesión activa, redirigir al dashboard.
+   * Al montar:
+   * 1. Si ya hay sesión activa → redirigir al dashboard.
+   * 2. Suscribirse a cambios de auth (detección de confirmación de email).
    */
   useEffect(() => {
     let mounted = true;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!mounted) return;
       if (session?.user) {
@@ -67,15 +79,45 @@ export default function RegisterPageClient() {
         setIsCheckingSession(false);
       }
     });
+
+    // ⭐ NUEVO: Listener de auth state para detectar confirmación de email
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (!mounted) return;
+        console.log("[Register] Auth state:", event);
+
+        if (event === "SIGNED_IN" && session?.user) {
+          toast.success("¡Cuenta confirmada! Redirigiendo...");
+          // Crear trial automáticamente si no existe
+          const trialOk = await createTrialSubscription(session.user.id);
+          if (trialOk) {
+            toast.success("🎁 Tu prueba de 15 días ha sido activada.");
+          }
+          router.push("/dashboard");
+        }
+
+        if (event === "USER_UPDATED" && session?.user) {
+          toast.success("¡Email confirmado! Redirigiendo al dashboard...");
+          const trialOk = await createTrialSubscription(session.user.id);
+          if (trialOk) {
+            toast.success("🎁 Tu prueba de 15 días ha sido activada.");
+          }
+          router.push("/dashboard");
+        }
+      }
+    );
+
     return () => {
       mounted = false;
+      authListener?.subscription?.unsubscribe();
     };
   }, [router]);
 
   /**
-   * Crea una suscripción de prueba automáticamente para un usuario recién registrado.
+   * Crea una suscripción de prueba automáticamente.
+   * Ahora maneja errores silenciosos para no bloquear el registro.
    */
-  const createTrialSubscription = async (userId: string): Promise<boolean> => {
+  const createTrialSubscription = useCallback(async (userId: string): Promise<boolean> => {
     try {
       const plansRes = await fetch("/api/subscription-plans", { cache: "no-store" });
       const plansJson = await plansRes.json();
@@ -104,11 +146,8 @@ export default function RegisterPageClient() {
           user_id: userId,
           plan_id: trialPlan.id,
           estado: "trialing",
-          metadata: {
-            source: "auto_trial_on_register",
-            referral_code: referralCode || null,
-            registered_at: new Date().toISOString(),
-          },
+          fecha_inicio: new Date().toISOString(),
+          fecha_prueba_fin: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
         }),
       });
 
@@ -125,7 +164,7 @@ export default function RegisterPageClient() {
       console.error("[Register] Error creating trial subscription:", err);
       return false;
     }
-  };
+  }, []);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -168,7 +207,8 @@ export default function RegisterPageClient() {
             full_name: trimmedName,
             referral_code: referralCode,
           },
-          emailRedirectTo: `${window.location.origin}/login`,
+          // ⭐ CORREGIDO: Redirigir a /auth/callback para procesar confirmación automáticamente
+          emailRedirectTo: `${getSiteUrl()}/auth/callback`,
         },
       });
 
@@ -178,36 +218,61 @@ export default function RegisterPageClient() {
           message = "Este email ya está registrado. Intenta iniciar sesión.";
         } else if (error.message.includes("rate limit")) {
           message = "Demasiados intentos. Por favor espera unos minutos.";
-        } else if (error.message.includes("password")) {
-          message = "La contraseña no cumple con los requisitos de seguridad.";
         }
         toast.error(message);
         return;
       }
 
       const userId = data.user?.id;
-      let trialOk = false;
-      if (userId) {
-        trialOk = await createTrialSubscription(userId);
-      }
-      setTrialCreated(trialOk);
+      const emailConfirmed = data.user?.email_confirmed_at != null;
 
-      if (trialOk) {
-        toast.success("¡Cuenta creada! Tu prueba gratuita de 15 días ha sido activada.");
-      } else {
-        toast.success("¡Cuenta creada! Revisa tu email para confirmarla.");
-        if (userId) {
-          toast.warning(
-            "No pudimos activar tu prueba automáticamente. Contacta soporte si no ves tus funciones premium.",
-            { duration: 6000 }
-          );
+      // Si el email ya está confirmado (raro, pero posible en algunos providers),
+      // crear trial inmediatamente
+      if (userId && emailConfirmed) {
+        const trialOk = await createTrialSubscription(userId);
+        setTrialCreated(trialOk);
+        if (trialOk) {
+          toast.success("¡Cuenta creada! Tu prueba gratuita de 15 días ha sido activada.");
+          router.push("/dashboard");
+          return;
         }
+      }
+
+      // Email requiere confirmación
+      if (userId && !emailConfirmed) {
+        setNeedsEmailConfirmation(true);
+        // Intentar crear trial de todas formas (algunas configs de Supabase permiten esto)
+        const trialOk = await createTrialSubscription(userId);
+        setTrialCreated(trialOk);
       }
 
       setDone(true);
     } catch (err) {
       console.error("[Register] Unexpected error:", err);
       toast.error("Error al crear la cuenta. Intenta de nuevo más tarde.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!email.trim() || !EMAIL_REGEX.test(email.trim())) {
+      toast.error("Ingresa un email válido.");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+      });
+      if (error) {
+        toast.error("Error al reenviar: " + error.message);
+      } else {
+        toast.success("¡Correo de confirmación reenviado! Revisa tu bandeja de entrada.");
+      }
+    } catch {
+      toast.error("Error inesperado al reenviar.");
     } finally {
       setIsLoading(false);
     }
@@ -223,7 +288,7 @@ export default function RegisterPageClient() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${getSiteUrl()}/auth/callback`,
           queryParams: referralCode
             ? { access_type: "offline", prompt: "consent", state: referralCode }
             : { access_type: "offline", prompt: "consent" },
@@ -277,19 +342,35 @@ export default function RegisterPageClient() {
             Revisa tu correo <strong>{email}</strong> para confirmar tu cuenta.
           </p>
 
+          {needsEmailConfirmation && (
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-lg mb-4">
+              <p className="text-sm text-blue-700 dark:text-blue-300">
+                📧 Te enviamos un correo de confirmación. Haz clic en el link para activar tu cuenta.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleResendConfirmation}
+                disabled={isLoading}
+                className="mt-2 gap-2 w-full"
+              >
+                {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                Reenviar correo de confirmación
+              </Button>
+            </div>
+          )}
+
           {trialCreated ? (
             <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg mb-6">
               <p className="text-sm text-emerald-700 dark:text-emerald-400">
-                🎁 Tu prueba gratuita de 15 días en el plan Profesional ha sido activada.
-                Una vez confirmes tu email, podrás acceder a todas las funciones.
+                🎁 Tu prueba gratuita de 15 días ha sido activada. Una vez confirmes tu email, podrás acceder a todas las funciones.
               </p>
             </div>
           ) : (
             <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg mb-6">
               <p className="text-sm text-amber-700 dark:text-amber-400">
                 <AlertCircle className="w-4 h-4 inline mr-1" />
-                Tu cuenta fue creada, pero no pudimos activar la prueba automáticamente.
-                Contacta soporte si no ves tus funciones premium después de confirmar tu email.
+                Tu cuenta fue creada. Después de confirmar tu email, activa tu plan desde el dashboard.
               </p>
             </div>
           )}
@@ -419,11 +500,7 @@ export default function RegisterPageClient() {
                   tabIndex={-1}
                   aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
                 >
-                  {showPassword ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -431,10 +508,11 @@ export default function RegisterPageClient() {
               </p>
             </div>
 
-            {/* Términos y condiciones — requerido legalmente */}
+            {/* Términos y condiciones */}
             <div className="flex items-start gap-2.5">
               <Checkbox
                 id="terms"
+                name="terms"
                 checked={acceptedTerms}
                 onCheckedChange={(checked) => setAcceptedTerms(checked === true)}
                 className="mt-0.5"
@@ -457,9 +535,7 @@ export default function RegisterPageClient() {
               className="w-full h-11 font-semibold"
               disabled={isLoading || isGoogleLoading}
             >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : null}
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Crear Cuenta Gratis
             </Button>
           </form>
@@ -467,10 +543,7 @@ export default function RegisterPageClient() {
           <div className="mt-6 text-center space-y-3">
             <p className="text-sm text-muted-foreground">
               ¿Ya tienes cuenta?{" "}
-              <Link
-                href="/login"
-                className="text-primary font-semibold hover:underline"
-              >
+              <Link href="/login" className="text-primary font-semibold hover:underline">
                 Iniciar Sesión
               </Link>
             </p>

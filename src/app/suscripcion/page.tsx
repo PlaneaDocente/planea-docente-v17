@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   LogIn,
   RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -21,21 +22,20 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   INTERFAZ UNIFICADA — Misma estructura que SuscripcionSection.tsx
-   para compatibilidad total con /api/subscription-plans
-   ═══════════════════════════════════════════════════════════════════════════ */
 interface SubscriptionPlan {
   id: string;
   nombre: string;
   descripcion: string | null;
-  precio_centavos: number;
-  precio_centavos_anual?: number | null;
+  precio_mensual: number | null;
+  precio_anual: number | null;
+  precio_centavos: number | null;
+  precio_centavos_anual: number | null;
   caracteristicas: string[];
   activo: boolean;
   orden: number;
   stripe_price_id: string | null;
-  stripe_price_id_anual?: string | null;
+  stripe_price_id_anual: string | null;
+  dias_prueba: number | null;
 }
 
 interface CurrentSubscription {
@@ -46,13 +46,18 @@ interface CurrentSubscription {
 type LoadingState = "idle" | "loading" | "error" | "ready";
 type CheckoutState = "idle" | "redirecting" | "error";
 
-function formatPrice(cents: number): string {
-  return `$${(cents / 100).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+function formatPrice(cents: number | null, pesos: number | null): string {
+  // Prioridad 1: centavos (nueva estructura)
+  if (cents && cents > 0) {
+    return `$${(cents / 100).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+  }
+  // Prioridad 2: pesos (estructura antigua)
+  if (pesos && pesos > 0) {
+    return `$${pesos.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+  }
+  return "Gratis";
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   COMPONENTE PRINCIPAL
-   ═══════════════════════════════════════════════════════════════════════════ */
 export default function SuscripcionPage() {
   const router = useRouter();
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
@@ -63,7 +68,6 @@ export default function SuscripcionPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  /* ── Cargar planes y suscripción actual ───────────────────────────────── */
   const loadData = useCallback(async () => {
     setLoadState("loading");
     setErrorMsg(null);
@@ -79,13 +83,13 @@ export default function SuscripcionPage() {
         throw new Error(plansJson.error || "Error al cargar planes");
       }
 
-      // Normalizar datos: asegurar que todos los planes tengan campos compatibles
       const normalizedPlans: SubscriptionPlan[] = (plansJson.data ?? []).map((p: any) => ({
         ...p,
         precio_centavos: p.precio_centavos ?? (p.precio_mensual ? p.precio_mensual * 100 : 0),
         precio_centavos_anual: p.precio_centavos_anual ?? (p.precio_anual ? p.precio_anual * 100 : null),
         stripe_price_id_anual: p.stripe_price_id_anual ?? null,
         caracteristicas: p.caracteristicas ?? [],
+        dias_prueba: p.dias_prueba ?? 15,
       }));
 
       setPlans(normalizedPlans);
@@ -113,7 +117,6 @@ export default function SuscripcionPage() {
     loadData();
   }, [loadData]);
 
-  /* ── Checkout unificado (mismo payload que SuscripcionSection.tsx) ────── */
   const handleSubscribe = useCallback(async (plan: SubscriptionPlan, billing: "monthly" | "annual" = "monthly") => {
     setCheckoutState("redirecting");
     setActivePlanId(plan.id);
@@ -164,7 +167,6 @@ export default function SuscripcionPage() {
     }
   }, [router]);
 
-  /* ── Estados de carga ─────────────────────────────────────────────────── */
   if (loadState === "loading") {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex items-center justify-center p-4">
@@ -193,7 +195,6 @@ export default function SuscripcionPage() {
     );
   }
 
-  /* ── Render principal ─────────────────────────────────────────────────── */
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 py-12 px-4">
       <div className="max-w-6xl mx-auto space-y-10">
@@ -285,10 +286,14 @@ export default function SuscripcionPage() {
             const isPopular = plan.nombre.toLowerCase().includes("profesional");
             const isInstitutional = plan.nombre.toLowerCase().includes("institucional");
             const isCurrent = currentSubscription?.plan_id === plan.id;
-            const monthlyPrice = plan.precio_centavos;
-            const annualPrice = plan.precio_centavos_anual ?? Math.round(plan.precio_centavos * 10);
-            const hasMonthlyPrice = !!plan.stripe_price_id;
-            const hasAnnualPrice = !!(plan.stripe_price_id_anual || plan.stripe_price_id);
+
+            // Calcular precios para mostrar
+            const monthlyPrice = plan.precio_centavos ?? plan.precio_mensual ?? 0;
+            const annualPrice = plan.precio_centavos_anual ?? plan.precio_anual ?? 0;
+            const hasRealPrice = monthlyPrice > 0;
+            const hasStripePrice = !!plan.stripe_price_id;
+            const canSubscribe = hasStripePrice && !!userId;
+            const isFreePlan = !hasRealPrice && !hasStripePrice;
 
             return (
               <motion.div
@@ -330,17 +335,30 @@ export default function SuscripcionPage() {
                   </CardHeader>
 
                   <CardContent className="flex-1 flex flex-col space-y-6">
-                    {/* Precio mensual */}
+                    {/* Precio */}
                     <div className="text-center space-y-1">
                       <div className="flex items-baseline justify-center gap-1">
                         <span className="text-4xl font-extrabold tracking-tight">
-                          {formatPrice(monthlyPrice)}
+                          {formatPrice(plan.precio_centavos, plan.precio_mensual)}
                         </span>
-                        <span className="text-muted-foreground">MXN/mes</span>
+                        {hasRealPrice && (
+                          <span className="text-muted-foreground">MXN/mes</span>
+                        )}
                       </div>
                       {annualPrice > 0 && (
                         <p className="text-xs text-muted-foreground">
-                          o {formatPrice(annualPrice)} MXN/año
+                          o {formatPrice(plan.precio_centavos_anual, plan.precio_anual)} MXN/año
+                        </p>
+                      )}
+                      {!hasRealPrice && !isFreePlan && (
+                        <p className="text-xs text-amber-600 flex items-center justify-center gap-1 mt-1">
+                          <AlertCircle className="w-3 h-3" />
+                          Precio pendiente de configuración
+                        </p>
+                      )}
+                      {plan.dias_prueba && plan.dias_prueba > 0 && hasRealPrice && (
+                        <p className="text-xs text-green-600 font-medium mt-1">
+                          🎁 {plan.dias_prueba} días de prueba gratis
                         </p>
                       )}
                     </div>
@@ -375,15 +393,19 @@ export default function SuscripcionPage() {
                           <Button
                             onClick={() => handleSubscribe(plan, "monthly")}
                             disabled={checkoutState === "redirecting" && activePlanId === plan.id}
-                            className={`w-full gap-2 ${
-                              isPopular ? "bg-primary hover:bg-primary/90" : ""
-                            }`}
+                            className={`w-full gap-2 ${isPopular ? "bg-primary hover:bg-primary/90" : ""}`}
                           >
                             {checkoutState === "redirecting" && activePlanId === plan.id ? (
                               <>
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 Redirigiendo...
                               </>
+                            ) : !userId ? (
+                              "Inicia sesión para suscribirte"
+                            ) : isFreePlan ? (
+                              "Activar gratis"
+                            ) : !hasStripePrice ? (
+                              "No disponible"
                             ) : (
                               <>
                                 Elegir Plan
@@ -391,7 +413,8 @@ export default function SuscripcionPage() {
                               </>
                             )}
                           </Button>
-                          {hasAnnualPrice && (
+
+                          {annualPrice > 0 && hasStripePrice && (
                             <Button
                               onClick={() => handleSubscribe(plan, "annual")}
                               disabled={checkoutState === "redirecting" && activePlanId === plan.id}
@@ -403,8 +426,11 @@ export default function SuscripcionPage() {
                           )}
                         </>
                       )}
-                      {!hasMonthlyPrice && (
-                        <p className="text-xs text-center text-amber-600">
+
+                      {/* Mensajes informativos debajo del botón */}
+                      {!hasStripePrice && userId && !isFreePlan && (
+                        <p className="text-xs text-center text-amber-600 flex items-center justify-center gap-1">
+                          <AlertCircle className="w-3 h-3" />
                           Plan pendiente de configuración de pago.
                         </p>
                       )}
