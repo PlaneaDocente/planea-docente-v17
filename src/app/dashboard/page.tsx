@@ -1,46 +1,35 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useState, useEffect, useCallback, Suspense, lazy } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  GraduationCap,
-  LayoutDashboard,
-  Users,
-  CalendarCheck,
-  BookOpen,
-  ClipboardList,
-  Star,
-  Camera,
-  FileText,
-  MessageSquare,
-  Settings,
-  LogOut,
-  Crown,
-  Zap,
-  Menu,
-  X,
-  Loader2,
+  GraduationCap, LayoutDashboard, Users, CalendarCheck, BookOpen,
+  ClipboardList, Star, Camera, FileText, MessageSquare, Settings,
+  LogOut, Crown, Zap, Menu, Loader2, AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+
+/* ── Importación del DashboardSection del usuario ───────────────────────── */
 import DashboardSection from "@/components/planea/DashboardSection";
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   MAPA DE SECCIONES DEL DASHBOARD
+   MAPA DE SECCIONES
+   Añade aquí los imports de tus demás secciones conforme las tengas listas:
    ═══════════════════════════════════════════════════════════════════════════ */
 const SECTIONS = [
-  { id: "inicio", label: "Dashboard", icon: LayoutDashboard, component: DashboardSection },
-  { id: "alumnos", label: "Alumnos", icon: Users },
-  { id: "asistencia", label: "Asistencia", icon: CalendarCheck },
-  { id: "planeacion", label: "Planeación", icon: BookOpen },
-  { id: "actividades", label: "Actividades", icon: ClipboardList },
-  { id: "evaluaciones", label: "Evaluaciones", icon: Star },
-  { id: "evidencias", label: "Evidencias", icon: Camera },
-  { id: "reportes", label: "Reportes", icon: FileText },
-  { id: "padres", label: "Padres", icon: MessageSquare },
+  { id: "inicio",      label: "Dashboard",    icon: LayoutDashboard, component: DashboardSection },
+  { id: "alumnos",     label: "Alumnos",      icon: Users },
+  { id: "asistencia",  label: "Asistencia",   icon: CalendarCheck },
+  { id: "planeacion",  label: "Planeación",   icon: BookOpen },
+  { id: "actividades", label: "Actividades",  icon: ClipboardList },
+  { id: "evaluaciones",label: "Evaluaciones", icon: Star },
+  { id: "evidencias",  label: "Evidencias",   icon: Camera },
+  { id: "reportes",    label: "Reportes",     icon: FileText },
+  { id: "padres",      label: "Padres",       icon: MessageSquare },
   { id: "herramientas-ia", label: "Herramientas IA", icon: Zap },
   { id: "configuracion", label: "Configuración", icon: Settings },
 ];
@@ -56,10 +45,12 @@ export default function DashboardPage() {
   const [subscription, setSubscription] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  /* ── Cargar usuario y suscripción ─────────────────────────────────────── */
+  /* ── 1. Cargar sesión y suscripción ───────────────────────────────────── */
   useEffect(() => {
+    let mounted = true;
     const load = async () => {
       const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
       if (!session?.user) {
         router.push("/login?redirect=/dashboard");
         return;
@@ -69,33 +60,44 @@ export default function DashboardPage() {
       try {
         const res = await fetch(`/api/user-subscription?user_id=${session.user.id}`);
         const json = await res.json();
-        if (json.success && json.data?.subscription) {
-          setSubscription(json.data);
-        }
+        if (mounted && json.success) setSubscription(json.data);
       } catch (e) {
         console.error("[Dashboard] Subscription check failed:", e);
       }
-      setLoading(false);
+      if (mounted) setLoading(false);
     };
     load();
+    return () => { mounted = false; };
   }, [router]);
 
-  /* ── Escuchar eventos de navegación desde DashboardSection ────────────── */
+  /* ── 2. ESCUCHAR EVENTOS DE NAVEGACIÓN (CRÍTICO para botones del DashboardSection)
+     DashboardSection dispara: window.dispatchEvent(new CustomEvent('navigate', {detail: 'asistencia'}))
+     Esta página CAPTA ese evento y cambia la sección activa.
+  ────────────────────────────────────────────────────────────────────────── */
   useEffect(() => {
     const handleNavigate = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (typeof detail === "string") {
-        const section = SECTIONS.find((s) => s.id === detail);
-        if (section) {
-          setActiveSection(detail);
-          setSidebarOpen(false);
-        } else if (detail === "suscripcion") {
-          router.push("/suscripcion");
-        } else {
-          toast.info(`Sección "${detail}" en desarrollo.`);
-        }
+      if (typeof detail !== "string") return;
+
+      console.log("[Dashboard] Navigate event received:", detail);
+
+      // Si es una ruta externa (suscripcion, login, etc.)
+      if (detail === "suscripcion") {
+        router.push("/suscripcion");
+        return;
+      }
+
+      // Si es una sección interna
+      const section = SECTIONS.find((s) => s.id === detail);
+      if (section) {
+        setActiveSection(detail);
+        setSidebarOpen(false);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        toast.info(`Sección "${detail}" próximamente disponible.`);
       }
     };
+
     window.addEventListener("navigate", handleNavigate);
     return () => window.removeEventListener("navigate", handleNavigate);
   }, [router]);
@@ -119,23 +121,19 @@ export default function DashboardPage() {
   const ActiveComponent = SECTIONS.find((s) => s.id === activeSection)?.component;
   const isTrialing = subscription?.subscription?.estado === "trialing";
   const isActive = subscription?.subscription?.estado === "active";
+  const hasSub = isTrialing || isActive;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex">
-      {/* Mobile overlay */}
+      {/* Overlay móvil */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Sidebar */}
-      <aside
-        className={`fixed md:static inset-y-0 left-0 z-50 w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col transition-transform duration-300 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
-        }`}
-      >
+      {/* ── SIDEBAR ────────────────────────────────────────────────────────── */}
+      <aside className={`fixed md:static inset-y-0 left-0 z-50 w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col transition-transform duration-300 ${
+        sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+      }`}>
         {/* Logo */}
         <div className="p-5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3">
@@ -157,10 +155,7 @@ export default function DashboardPage() {
             return (
               <button
                 key={section.id}
-                onClick={() => {
-                  setActiveSection(section.id);
-                  setSidebarOpen(false);
-                }}
+                onClick={() => { setActiveSection(section.id); setSidebarOpen(false); }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
                   isActive
                     ? "bg-primary/10 text-primary font-semibold shadow-sm"
@@ -170,9 +165,7 @@ export default function DashboardPage() {
                 <Icon className={`w-4 h-4 ${isActive ? "text-primary" : ""}`} />
                 {section.label}
                 {section.id === "herramientas-ia" && (
-                  <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0">
-                    IA
-                  </Badge>
+                  <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0">IA</Badge>
                 )}
               </button>
             );
@@ -181,7 +174,7 @@ export default function DashboardPage() {
 
         {/* Footer sidebar */}
         <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
-          {(isTrialing || isActive) && subscription?.plan && (
+          {hasSub && subscription?.plan && (
             <div className="px-3 py-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg">
               <div className="flex items-center gap-2">
                 <Crown className="w-3.5 h-3.5 text-emerald-600" />
@@ -203,26 +196,19 @@ export default function DashboardPage() {
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top bar */}
         <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 md:px-8 py-3 flex items-center justify-between sticky top-0 z-30">
           <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="md:hidden h-8 w-8 p-0"
-              onClick={() => setSidebarOpen(true)}
-            >
+            <Button variant="ghost" size="sm" className="md:hidden h-8 w-8 p-0" onClick={() => setSidebarOpen(true)}>
               <Menu className="w-5 h-5" />
             </Button>
             <div>
               <h2 className="text-sm md:text-base font-bold">
                 {SECTIONS.find((s) => s.id === activeSection)?.label}
               </h2>
-              <p className="text-xs text-muted-foreground hidden md:block">
-                {user?.email}
-              </p>
+              <p className="text-xs text-muted-foreground hidden md:block">{user?.email}</p>
             </div>
           </div>
 
@@ -233,26 +219,21 @@ export default function DashboardPage() {
                 Trial
               </Badge>
             )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => router.push("/suscripcion")}
-              className="hidden sm:flex gap-1 text-xs"
-            >
+            <Button size="sm" variant="outline" onClick={() => router.push("/suscripcion")} className="hidden sm:flex gap-1 text-xs">
               <Zap className="w-3 h-3" />
-              {isActive || isTrialing ? "Mi plan" : "Actualizar"}
+              {hasSub ? "Mi plan" : "Actualizar"}
             </Button>
           </div>
         </header>
 
-        {/* Content area */}
+        {/* Área de contenido */}
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeSection}
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
+              exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
             >
               {ActiveComponent ? (
@@ -269,13 +250,9 @@ export default function DashboardPage() {
                     {SECTIONS.find((s) => s.id === activeSection)?.label}
                   </h3>
                   <p className="text-sm text-muted-foreground max-w-sm">
-                    Esta sección está en desarrollo. Pronto estará disponible con todas las funciones.
+                    Esta sección está en desarrollo. Pronto estará disponible con todas las funciones de la Nueva Escuela Mexicana.
                   </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setActiveSection("inicio")}
-                  >
+                  <Button variant="outline" size="sm" onClick={() => setActiveSection("inicio")}>
                     Volver al Dashboard
                   </Button>
                 </div>
