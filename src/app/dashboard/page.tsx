@@ -1,94 +1,103 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   GraduationCap,
-  Loader2,
   LayoutDashboard,
   Users,
   CalendarCheck,
   BookOpen,
   ClipboardList,
   Star,
-  ImageIcon,
+  Camera,
   FileText,
   MessageSquare,
   Settings,
   LogOut,
   Crown,
-  AlertCircle,
+  Zap,
+  Menu,
+  X,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import DashboardSection from "@/components/planea/DashboardSection";
 
-interface UserProfile {
-  id: string;
-  email: string;
-  full_name: string | null;
-}
+/* ═══════════════════════════════════════════════════════════════════════════
+   MAPA DE SECCIONES DEL DASHBOARD
+   ═══════════════════════════════════════════════════════════════════════════ */
+const SECTIONS = [
+  { id: "inicio", label: "Dashboard", icon: LayoutDashboard, component: DashboardSection },
+  { id: "alumnos", label: "Alumnos", icon: Users },
+  { id: "asistencia", label: "Asistencia", icon: CalendarCheck },
+  { id: "planeacion", label: "Planeación", icon: BookOpen },
+  { id: "actividades", label: "Actividades", icon: ClipboardList },
+  { id: "evaluaciones", label: "Evaluaciones", icon: Star },
+  { id: "evidencias", label: "Evidencias", icon: Camera },
+  { id: "reportes", label: "Reportes", icon: FileText },
+  { id: "padres", label: "Padres", icon: MessageSquare },
+  { id: "herramientas-ia", label: "Herramientas IA", icon: Zap },
+  { id: "configuracion", label: "Configuración", icon: Settings },
+];
 
-interface SubscriptionInfo {
-  estado: string;
-  plan_nombre: string;
-  dias_restantes: number;
-}
-
+/* ═══════════════════════════════════════════════════════════════════════════
+   PÁGINA PRINCIPAL DEL DASHBOARD
+   ═══════════════════════════════════════════════════════════════════════════ */
 export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
+  const [activeSection, setActiveSection] = useState("inicio");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [subscription, setSubscription] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [needsSub, setNeedsSub] = useState(false);
 
+  /* ── Cargar usuario y suscripción ─────────────────────────────────────── */
   useEffect(() => {
-    const loadDashboard = async () => {
+    const load = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        router.push("/login?redirect=/dashboard");
+        return;
+      }
+      setUser(session.user);
+
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-
-        if (!session?.user) {
-          router.push("/login?redirect=/dashboard");
-          return;
-        }
-
-        const profile: UserProfile = {
-          id: session.user.id,
-          email: session.user.email ?? "",
-          full_name: session.user.user_metadata?.full_name ?? null,
-        };
-        setUser(profile);
-
-        // Verificar suscripción
         const res = await fetch(`/api/user-subscription?user_id=${session.user.id}`);
         const json = await res.json();
-
         if (json.success && json.data?.subscription) {
-          const sub = json.data.subscription;
-          const plan = json.data.plan;
-
-          setSubscription({
-            estado: sub.estado,
-            plan_nombre: plan?.nombre ?? "Plan activo",
-            dias_restantes: sub.fecha_prueba_fin 
-              ? Math.max(0, Math.ceil((new Date(sub.fecha_prueba_fin).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-              : 0,
-          });
-        } else {
-          setNeedsSub(true);
+          setSubscription(json.data);
         }
-      } catch (err) {
-        console.error("[Dashboard] Error:", err);
-        toast.error("Error cargando el dashboard");
-      } finally {
-        setLoading(false);
+      } catch (e) {
+        console.error("[Dashboard] Subscription check failed:", e);
+      }
+      setLoading(false);
+    };
+    load();
+  }, [router]);
+
+  /* ── Escuchar eventos de navegación desde DashboardSection ────────────── */
+  useEffect(() => {
+    const handleNavigate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail === "string") {
+        const section = SECTIONS.find((s) => s.id === detail);
+        if (section) {
+          setActiveSection(detail);
+          setSidebarOpen(false);
+        } else if (detail === "suscripcion") {
+          router.push("/suscripcion");
+        } else {
+          toast.info(`Sección "${detail}" en desarrollo.`);
+        }
       }
     };
-
-    loadDashboard();
+    window.addEventListener("navigate", handleNavigate);
+    return () => window.removeEventListener("navigate", handleNavigate);
   }, [router]);
 
   const handleLogout = async () => {
@@ -107,195 +116,174 @@ export default function DashboardPage() {
     );
   }
 
+  const ActiveComponent = SECTIONS.find((s) => s.id === activeSection)?.component;
+  const isTrialing = subscription?.subscription?.estado === "trialing";
+  const isActive = subscription?.subscription?.estado === "active";
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 hidden md:flex flex-col">
-        <div className="p-6 border-b border-slate-200 dark:border-slate-800">
+      <aside
+        className={`fixed md:static inset-y-0 left-0 z-50 w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col transition-transform duration-300 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+        }`}
+      >
+        {/* Logo */}
+        <div className="p-5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-md">
               <GraduationCap className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="font-bold text-sm">PlaneaDocente</h1>
-              <p className="text-xs text-muted-foreground">V17 NEM</p>
+              <h1 className="font-bold text-sm leading-tight">PlaneaDocente</h1>
+              <p className="text-[10px] text-muted-foreground">V17 · NEM</p>
             </div>
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
-          <SidebarItem icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard" active />
-          <SidebarItem icon={<Users className="w-4 h-4" />} label="Alumnos" />
-          <SidebarItem icon={<CalendarCheck className="w-4 h-4" />} label="Asistencia" />
-          <SidebarItem icon={<BookOpen className="w-4 h-4" />} label="Planeación" />
-          <SidebarItem icon={<ClipboardList className="w-4 h-4" />} label="Actividades" />
-          <SidebarItem icon={<Star className="w-4 h-4" />} label="Evaluaciones" />
-          <SidebarItem icon={<ImageIcon className="w-4 h-4" />} label="Evidencias" />
-          <SidebarItem icon={<FileText className="w-4 h-4" />} label="Reportes" />
-          <SidebarItem icon={<MessageSquare className="w-4 h-4" />} label="Padres" />
-          <SidebarItem icon={<Settings className="w-4 h-4" />} label="Configuración" />
+        {/* Navegación */}
+        <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+          {SECTIONS.map((section) => {
+            const Icon = section.icon;
+            const isActive = activeSection === section.id;
+            return (
+              <button
+                key={section.id}
+                onClick={() => {
+                  setActiveSection(section.id);
+                  setSidebarOpen(false);
+                }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
+                  isActive
+                    ? "bg-primary/10 text-primary font-semibold shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-foreground"
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${isActive ? "text-primary" : ""}`} />
+                {section.label}
+                {section.id === "herramientas-ia" && (
+                  <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 py-0">
+                    IA
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
-        <div className="p-4 border-t border-slate-200 dark:border-slate-800">
-          <Button variant="outline" className="w-full gap-2" onClick={handleLogout}>
-            <LogOut className="w-4 h-4" /> Cerrar sesión
+        {/* Footer sidebar */}
+        <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+          {(isTrialing || isActive) && subscription?.plan && (
+            <div className="px-3 py-2 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Crown className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                  {isTrialing ? "🎁 Trial activo" : subscription.plan.nombre}
+                </span>
+              </div>
+            </div>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleLogout}
+            className="w-full justify-start gap-2 text-slate-600 dark:text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+          >
+            <LogOut className="w-4 h-4" />
+            Cerrar sesión
           </Button>
         </div>
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto">
-        {/* Header */}
-        <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 py-4">
-          <div className="flex items-center justify-between">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Top bar */}
+        <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 md:px-8 py-3 flex items-center justify-between sticky top-0 z-30">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="md:hidden h-8 w-8 p-0"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu className="w-5 h-5" />
+            </Button>
             <div>
-              <h2 className="text-xl font-bold">
-                ¡Hola, {user?.full_name || user?.email?.split("@")[0] || "Maestro"}!
+              <h2 className="text-sm md:text-base font-bold">
+                {SECTIONS.find((s) => s.id === activeSection)?.label}
               </h2>
-              <p className="text-sm text-muted-foreground">
-                Bienvenido a tu panel de PlaneaDocente
+              <p className="text-xs text-muted-foreground hidden md:block">
+                {user?.email}
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              {subscription && (
-                <Badge variant={subscription.estado === "trialing" ? "secondary" : "default"} className="gap-1">
-                  <Crown className="w-3 h-3" />
-                  {subscription.estado === "trialing" 
-                    ? `🎁 Trial: ${subscription.dias_restantes} días restantes`
-                    : subscription.plan_nombre}
-                </Badge>
-              )}
-            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {isTrialing && (
+              <Badge variant="secondary" className="gap-1 text-xs bg-amber-100 text-amber-700 border-amber-200">
+                <Crown className="w-3 h-3" />
+                Trial
+              </Badge>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => router.push("/suscripcion")}
+              className="hidden sm:flex gap-1 text-xs"
+            >
+              <Zap className="w-3 h-3" />
+              {isActive || isTrialing ? "Mi plan" : "Actualizar"}
+            </Button>
           </div>
         </header>
 
-        <div className="p-8 space-y-6">
-          {/* Banner si necesita suscripción */}
-          {needsSub && (
+        {/* Content area */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-8">
+          <AnimatePresence mode="wait">
             <motion.div
+              key={activeSection}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
             >
-              <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/30">
-                <CardContent className="py-4 flex items-center gap-4">
-                  <AlertCircle className="w-6 h-6 text-amber-600 shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-sm text-amber-800 dark:text-amber-300 font-medium">
-                      Activa un plan para desbloquear todas las funciones
-                    </p>
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
-                      Comienza con 15 días de prueba gratuita en el plan Profesional.
-                    </p>
+              {ActiveComponent ? (
+                <ActiveComponent />
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                    {(() => {
+                      const Icon = SECTIONS.find((s) => s.id === activeSection)?.icon || LayoutDashboard;
+                      return <Icon className="w-8 h-8 text-slate-400" />;
+                    })()}
                   </div>
-                  <Button size="sm" onClick={() => router.push("/suscripcion")}>
-                    Ver planes
+                  <h3 className="text-lg font-semibold text-muted-foreground">
+                    {SECTIONS.find((s) => s.id === activeSection)?.label}
+                  </h3>
+                  <p className="text-sm text-muted-foreground max-w-sm">
+                    Esta sección está en desarrollo. Pronto estará disponible con todas las funciones.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setActiveSection("inicio")}
+                  >
+                    Volver al Dashboard
                   </Button>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
-
-          {/* Stats grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard icon={<Users className="w-5 h-5 text-blue-500" />} label="Alumnos" value="0" />
-            <StatCard icon={<CalendarCheck className="w-5 h-5 text-green-500" />} label="Asistencia hoy" value="0%" />
-            <StatCard icon={<BookOpen className="w-5 h-5 text-violet-500" />} label="Planeaciones" value="0" />
-            <StatCard icon={<ClipboardList className="w-5 h-5 text-amber-500" />} label="Actividades" value="0" />
-          </div>
-
-          {/* Quick actions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Accesos rápidos</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <QuickAction label="Registrar alumno" icon={<Users className="w-4 h-4" />} />
-                <QuickAction label="Tomar asistencia" icon={<CalendarCheck className="w-4 h-4" />} />
-                <QuickAction label="Nueva planeación" icon={<BookOpen className="w-4 h-4" />} />
-                <QuickAction label="Generar reporte" icon={<FileText className="w-4 h-4" />} />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-medium">Información NEM</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Sistema alineado a la <strong>Nueva Escuela Mexicana</strong>.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline">Campos Formativos</Badge>
-                  <Badge variant="outline">Fases de Aprendizaje</Badge>
-                  <Badge variant="outline">Competencias</Badge>
-                  <Badge variant="outline">Desempeños</Badge>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </main>
     </div>
-  );
-}
-
-/* ── Sub-componentes ────────────────────────────────────────────────────── */
-
-function SidebarItem({
-  icon,
-  label,
-  active,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active?: boolean;
-}) {
-  return (
-    <button
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-        active
-          ? "bg-primary/10 text-primary font-medium"
-          : "text-muted-foreground hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-foreground"
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-            {icon}
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">{label}</p>
-            <p className="text-2xl font-bold">{value}</p>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function QuickAction({ label, icon }: { label: string; icon: React.ReactNode }) {
-  return (
-    <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-foreground transition-colors">
-      {icon}
-      {label}
-    </button>
   );
 }
