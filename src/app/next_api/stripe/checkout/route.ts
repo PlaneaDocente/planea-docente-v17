@@ -2,12 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
-// ─── STRIPE CLIENT ───
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
   typescript: true,
 });
 
-// ─── SUPABASE ADMIN CLIENT ───
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
   process.env.SUPABASE_SERVICE_ROLE_KEY || "",
@@ -16,26 +14,37 @@ const supabaseAdmin = createClient(
   }
 );
 
-/**
- * POST /next_api/stripe/checkout
- * Crea sesión de Stripe Checkout.
- * REQUIERE: Header Authorization con Bearer token JWT de Supabase
- */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { price_id, plan_id, billing = "month" } = body;
 
     // ─── VALIDAR PRICE_ID ───
-    if (!price_id || typeof price_id !== "string" || !price_id.startsWith("price_")) {
+    if (!price_id || typeof price_id !== "string") {
       return NextResponse.json(
-        { success: false, error: "price_id inválido", code: "INVALID_PRICE_ID" },
+        { success: false, error: "price_id es requerido", code: "MISSING_PRICE_ID" },
         { status: 400 }
       );
     }
 
-    // ─── OBTENER USUARIO AUTENTICADO ───
-    // Estrategia 1: Token JWT del header Authorization
+    // Rechazar placeholders
+    const lowerPrice = price_id.toLowerCase();
+    if (lowerPrice.includes("xxx") || lowerPrice.includes("yyy") || lowerPrice.includes("zzz")
+        || lowerPrice.includes("placeholder") || lowerPrice.includes("test") || lowerPrice.includes("demo")) {
+      return NextResponse.json(
+        { success: false, error: "El price_id es un placeholder. Configura Stripe correctamente.", code: "PLACEHOLDER_PRICE_ID" },
+        { status: 400 }
+      );
+    }
+
+    if (!price_id.startsWith("price_")) {
+      return NextResponse.json(
+        { success: false, error: "El price_id debe empezar con price_", code: "INVALID_PRICE_ID" },
+        { status: 400 }
+      );
+    }
+
+    // ─── AUTENTICACIÓN ───
     let userId: string | null = null;
     let userEmail: string | null = null;
     let userName: string | null = null;
@@ -50,7 +59,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Estrategia 2: Si no hay header, intentar con cookies/session
     if (!userId) {
       try {
         const { data: sessionData } = await supabaseAdmin.auth.getSession();
@@ -58,15 +66,10 @@ export async function POST(req: NextRequest) {
           userId = sessionData.session.user.id;
           userEmail = sessionData.session.user.email || null;
         }
-      } catch {
-        // Fallback silencioso
-      }
+      } catch { /* silent */ }
     }
 
-    // Estrategia 3: Si el body envía user_id como último recurso (legacy)
-    // Solo aceptar si coincide con la sesión verificada
     if (!userId && body.user_id) {
-      // Verificar que el user_id del body exista
       const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(body.user_id);
       if (userCheck?.user) {
         userId = userCheck.user.id;
@@ -94,7 +97,7 @@ export async function POST(req: NextRequest) {
       throw stripeErr;
     }
 
-    // ─── OBTENER PERFIL ───
+    // ─── PERFIL Y CUSTOMER ───
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("stripe_customer_id, full_name")
@@ -103,15 +106,13 @@ export async function POST(req: NextRequest) {
 
     userName = profile?.full_name || null;
 
-    // ─── CREAR/RECUPERAR CUSTOMER STRIPE ───
     let customerId: string | undefined = undefined;
-
     if (profile?.stripe_customer_id) {
       try {
         await stripe.customers.retrieve(profile.stripe_customer_id);
         customerId = profile.stripe_customer_id;
       } catch {
-        console.warn("[Checkout] Customer Stripe guardado inválido, creando nuevo");
+        console.warn("[Checkout] Customer inválido, creando nuevo");
       }
     }
 
@@ -122,14 +123,10 @@ export async function POST(req: NextRequest) {
         metadata: { supabase_user_id: userId, plan_id: plan_id || "" },
       });
       customerId = customer.id;
-
-      await supabaseAdmin
-        .from("profiles")
-        .update({ stripe_customer_id: customerId })
-        .eq("id", userId);
+      await supabaseAdmin.from("profiles").update({ stripe_customer_id: customerId }).eq("id", userId);
     }
 
-    // ─── CREAR SESIÓN CHECKOUT ───
+    // ─── SESIÓN CHECKOUT ───
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://planeadocente.com";
 
     const session = await stripe.checkout.sessions.create({
@@ -140,11 +137,7 @@ export async function POST(req: NextRequest) {
       success_url: `${siteUrl}/suscripcion/exito?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl}/suscripcion?canceled=true`,
       client_reference_id: userId,
-      metadata: {
-        user_id: userId,
-        plan_id: plan_id || "",
-        billing,
-      },
+      metadata: { user_id: userId, plan_id: plan_id || "", billing },
       subscription_data: {
         metadata: { user_id: userId, plan_id: plan_id || "" },
         trial_period_days: billing === "month" ? 15 : 0,

@@ -72,8 +72,18 @@ const FALLBACK_PLANS: SubscriptionPlan[] = [
   },
 ];
 
-function isValidStripePriceId(val: unknown): val is string {
-  return typeof val === "string" && val.trim().startsWith("price_") && val.trim().length > 6;
+// Validación estricta: rechaza placeholders como price_XXX, price_YYY, etc.
+function isValidStripePriceId(val: unknown): boolean {
+  if (typeof val !== "string") return false;
+  const trimmed = val.trim();
+  if (!trimmed.startsWith("price_")) return false;
+  if (trimmed.length < 10) return false;
+  // Rechazar placeholders comunes
+  const lower = trimmed.toLowerCase();
+  if (lower.includes("xxx") || lower.includes("yyy") || lower.includes("zzz")) return false;
+  if (lower.includes("placeholder") || lower.includes("test") || lower.includes("demo")) return false;
+  if (lower.includes("example") || lower.includes("sample")) return false;
+  return true;
 }
 
 export default function SuscripcionClient() {
@@ -86,7 +96,6 @@ export default function SuscripcionClient() {
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
   const [currentSubscription, setCurrentSubscription] = useState<CurrentSubscription | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [stripeConfigured, setStripeConfigured] = useState(false);
   const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
@@ -99,9 +108,7 @@ export default function SuscripcionClient() {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const uid = sessionData?.session?.user?.id ?? null;
-      const token = sessionData?.session?.access_token ?? null;
       setUserId(uid);
-      setSessionToken(token);
 
       let normalizedPlans: SubscriptionPlan[] = [];
       let apiSuccess = false;
@@ -148,7 +155,7 @@ export default function SuscripcionClient() {
         toast.warning("Mostrando planes de respaldo.");
       }
 
-      // Verificar Stripe: al menos UN plan debe tener price_id válido
+      // Verificar Stripe: al menos UN plan debe tener price_id REAL (no placeholder)
       const hasStripeIds = normalizedPlans.some((p) => {
         const pid = billing === "annual" ? p.stripe_price_id_anual : p.stripe_price_id;
         return isValidStripePriceId(pid);
@@ -234,7 +241,7 @@ export default function SuscripcionClient() {
         return;
       }
 
-      const priceId = rawPriceId.trim();
+      const priceId = (rawPriceId as string).trim();
 
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
