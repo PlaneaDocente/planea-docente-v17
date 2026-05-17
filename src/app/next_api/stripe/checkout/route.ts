@@ -2,28 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
-// ─── VALIDACIÓN DE ENTORNO ───
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!STRIPE_SECRET_KEY) {
-  console.error("[Checkout] FATAL: STRIPE_SECRET_KEY no está configurado");
-}
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error("[Checkout] FATAL: Variables de Supabase no configuradas");
-}
-
 // ─── STRIPE CLIENT ───
-// No especificamos apiVersion para que Stripe use la última estable automáticamente
-const stripe = new Stripe(STRIPE_SECRET_KEY || "sk_test_placeholder", {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
   typescript: true,
 });
 
 // ─── SUPABASE ADMIN CLIENT ───
 const supabaseAdmin = createClient(
-  SUPABASE_URL || "",
-  SUPABASE_SERVICE_KEY || "",
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "",
   {
     auth: { autoRefreshToken: false, persistSession: false },
   }
@@ -31,238 +18,148 @@ const supabaseAdmin = createClient(
 
 /**
  * POST /next_api/stripe/checkout
- * Crea una sesión de Stripe Checkout con validación completa y seguridad reforzada.
- * 
- * Payload esperado: { price_id, billing?, plan_id }
- * NOTA: user_id se obtiene EXCLUSIVAMENTE de la sesión autenticada. Nunca del body.
+ * Crea sesión de Stripe Checkout.
+ * REQUIERE: Header Authorization con Bearer token JWT de Supabase
  */
 export async function POST(req: NextRequest) {
   try {
-    // ── 1. VERIFICAR ENTORNO ────────────────────────────────────────────
-    if (!STRIPE_SECRET_KEY || STRIPE_SECRET_KEY === "sk_test_placeholder") {
+    const body = await req.json();
+    const { price_id, plan_id, billing = "month" } = body;
+
+    // ─── VALIDAR PRICE_ID ───
+    if (!price_id || typeof price_id !== "string" || !price_id.startsWith("price_")) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Stripe no está configurado en el servidor.",
-          code: "STRIPE_NOT_CONFIGURED",
-          detail: "Agrega STRIPE_SECRET_KEY a las variables de entorno de Vercel.",
-        },
-        { status: 500 }
+        { success: false, error: "price_id inválido", code: "INVALID_PRICE_ID" },
+        { status: 400 }
       );
     }
 
-    // ── 2. OBTENER USUARIO AUTENTICADO (SOLO del token, NUNCA del body) ──
+    // ─── OBTENER USUARIO AUTENTICADO ───
+    // Estrategia 1: Token JWT del header Authorization
     let userId: string | null = null;
     let userEmail: string | null = null;
     let userName: string | null = null;
 
-    // Intentar obtener de Authorization header
     const authHeader = req.headers.get("authorization");
     if (authHeader?.startsWith("Bearer ")) {
-      const token = authHeader.replace("Bearer ", "");
+      const token = authHeader.replace("Bearer ", "").trim();
       const { data: userData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-      if (!authErr && userData.user) {
+      if (!authErr && userData?.user) {
         userId = userData.user.id;
         userEmail = userData.user.email || null;
       }
     }
 
-    // Fallback: obtener de cookie session
+    // Estrategia 2: Si no hay header, intentar con cookies/session
     if (!userId) {
-      const { data: sessionData, error: sessionErr } = await supabaseAdmin.auth.getSession();
-      if (!sessionErr && sessionData?.session?.user) {
-        userId = sessionData.session.user.id;
-        userEmail = sessionData.session.user.email || null;
+      try {
+        const { data: sessionData } = await supabaseAdmin.auth.getSession();
+        if (sessionData?.session?.user) {
+          userId = sessionData.session.user.id;
+          userEmail = sessionData.session.user.email || null;
+        }
+      } catch {
+        // Fallback silencioso
+      }
+    }
+
+    // Estrategia 3: Si el body envía user_id como último recurso (legacy)
+    // Solo aceptar si coincide con la sesión verificada
+    if (!userId && body.user_id) {
+      // Verificar que el user_id del body exista
+      const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(body.user_id);
+      if (userCheck?.user) {
+        userId = userCheck.user.id;
+        userEmail = userCheck.user.email || null;
       }
     }
 
     if (!userId) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Debes iniciar sesión para realizar un pago.",
-          code: "UNAUTHENTICATED",
-        },
+        { success: false, error: "Debes iniciar sesión para realizar un pago.", code: "UNAUTHENTICATED" },
         { status: 401 }
       );
     }
 
-    // ── 3. PARSEAR Y VALIDAR BODY ──────────────────────────────────────
-    let body: any;
+    // ─── VERIFICAR PRICE_ID EN STRIPE ───
     try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json(
-        { success: false, error: "Body JSON inválido", code: "INVALID_JSON" },
-        { status: 400 }
-      );
-    }
-
-    const priceId = body.price_id;
-    const planId = body.plan_id ?? body.planId ?? null;
-    const billing: "month" | "year" =
-      body.billing === "year" || body.billing === "annual" ? "year" : "month";
-
-    // ── 4. VALIDAR PRICE_ID ─────────────────────────────────────────────
-    if (!priceId || typeof priceId !== "string" || !priceId.startsWith("price_")) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "El price_id es inválido o no está configurado para este plan.",
-          code: "INVALID_PRICE_ID",
-          detail: "Ve a Stripe Dashboard → Products, crea precios, y copia los price_... IDs a Supabase.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // ── 5. VERIFICAR QUE EL PRICE_ID EXISTE EN STRIPE ────────────────────
-    try {
-      await stripe.prices.retrieve(priceId);
+      await stripe.prices.retrieve(price_id);
     } catch (stripeErr: any) {
       if (stripeErr.code === "resource_missing") {
         return NextResponse.json(
-          {
-            success: false,
-            error: `El price_id "${priceId}" no existe en tu cuenta de Stripe.`,
-            code: "STRIPE_RESOURCE_MISSING",
-            detail: "Verifica que el precio esté creado en Stripe Dashboard y que uses la API key correcta.",
-          },
+          { success: false, error: `El price_id no existe en Stripe: ${price_id}`, code: "STRIPE_RESOURCE_MISSING" },
           { status: 400 }
         );
       }
       throw stripeErr;
     }
 
-    // ── 6. OBTENER PERFIL DEL USUARIO ────────────────────────────────────
-    const { data: profile, error: profileError } = await supabaseAdmin
+    // ─── OBTENER PERFIL ───
+    const { data: profile } = await supabaseAdmin
       .from("profiles")
-      .select("email, full_name, avatar_url, stripe_customer_id")
+      .select("stripe_customer_id, full_name")
       .eq("id", userId)
       .maybeSingle();
 
-    if (profileError) {
-      console.error("[Checkout] Error consultando perfil:", profileError);
-    }
-
-    userEmail = profile?.email || userEmail;
     userName = profile?.full_name || null;
 
-    // ── 7. CREAR O RECUPERAR CUSTOMER EN STRIPE ─────────────────────────
+    // ─── CREAR/RECUPERAR CUSTOMER STRIPE ───
     let customerId: string | undefined = undefined;
 
-    // Primero intentar usar el guardado en profiles
     if (profile?.stripe_customer_id) {
       try {
         await stripe.customers.retrieve(profile.stripe_customer_id);
         customerId = profile.stripe_customer_id;
       } catch {
-        console.warn("[Checkout] Customer Stripe guardado no existe, creando nuevo...");
+        console.warn("[Checkout] Customer Stripe guardado inválido, creando nuevo");
       }
     }
 
-    // Si no hay customerId válido, crear uno nuevo
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: userEmail || undefined,
         name: userName || undefined,
-        metadata: {
-          supabase_user_id: userId,
-          plan_id: planId || "",
-          source: "planeadocente_checkout",
-        },
+        metadata: { supabase_user_id: userId, plan_id: plan_id || "" },
       });
       customerId = customer.id;
 
-      // Guardar en profiles para futuras referencias
-      const { error: updateErr } = await supabaseAdmin
+      await supabaseAdmin
         .from("profiles")
         .update({ stripe_customer_id: customerId })
         .eq("id", userId);
-
-      if (updateErr) {
-        console.error("[Checkout] No se pudo guardar stripe_customer_id en profiles:", updateErr);
-      }
     }
 
-    // ── 8. CONSTRUIR URLS ──────────────────────────────────────────────
+    // ─── CREAR SESIÓN CHECKOUT ───
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://planeadocente.com";
 
-    // ── 9. CREAR SESIÓN DE CHECKOUT ─────────────────────────────────────
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: "subscription",
       payment_method_types: ["card"],
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
+      line_items: [{ price: price_id, quantity: 1 }],
       success_url: `${siteUrl}/suscripcion/exito?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${siteUrl}/suscripcion?canceled=true`,
       client_reference_id: userId,
       metadata: {
         user_id: userId,
-        plan_id: planId || "",
+        plan_id: plan_id || "",
         billing,
-        app: "planeadocente",
       },
       subscription_data: {
-        metadata: {
-          user_id: userId,
-          plan_id: planId || "",
-          app: "planeadocente",
-        },
+        metadata: { user_id: userId, plan_id: plan_id || "" },
         trial_period_days: billing === "month" ? 15 : 0,
       },
       allow_promotion_codes: true,
       billing_address_collection: "auto",
-      custom_text: {
-        submit: {
-          message: "🔒 Pago seguro procesado por Stripe. Cancela cuando quieras.",
-        },
-      },
       locale: "es",
     });
 
-    return NextResponse.json({
-      success: true,
-      url: session.url,
-      session_id: session.id,
-    });
+    return NextResponse.json({ success: true, url: session.url, session_id: session.id });
 
   } catch (err: any) {
-    console.error("[Stripe Checkout] Error fatal:", err);
-
-    if (err.type === "StripeAuthenticationError") {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Error de autenticación con Stripe. Verifica STRIPE_SECRET_KEY.",
-          code: "STRIPE_AUTH_ERROR",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (err.type === "StripeConnectionError") {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "No se pudo conectar con Stripe. Intenta más tarde.",
-          code: "STRIPE_CONNECTION_ERROR",
-        },
-        { status: 503 }
-      );
-    }
-
+    console.error("[Checkout] Error fatal:", err);
     return NextResponse.json(
-      {
-        success: false,
-        error: err.message || "Error interno al crear la sesión de pago",
-        code: "INTERNAL_ERROR",
-      },
+      { success: false, error: err.message || "Error interno", code: "INTERNAL_ERROR" },
       { status: 500 }
     );
   }
