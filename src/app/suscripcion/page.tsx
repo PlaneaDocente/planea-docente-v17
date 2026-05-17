@@ -1,275 +1,378 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import {
-  Check, Loader2, Sparkles, Zap, Building2, ArrowRight, Crown,
-  AlertTriangle, LogIn, RefreshCw, AlertCircle, Shield, Info,
-  ChevronRight, Clock
+  Check,
+  Zap,
+  Building2,
+  GraduationCap,
+  ArrowRight,
+  Loader2,
+  AlertTriangle,
+  Shield,
+  Clock,
+  Sparkles,
+  Crown,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
-interface SubscriptionPlan {
+// ─── TIPOS ───
+interface Plan {
   id: string;
   nombre: string;
-  descripcion: string | null;
-  precio_mensual: number | null;
-  precio_anual: number | null;
-  precio_centavos: number | null;
-  precio_centavos_anual: number | null;
+  descripcion: string;
+  precio_mensual: number;
+  precio_anual: number;
+  precio_centavos: number;
+  precio_centavos_anual: number;
   caracteristicas: string[];
-  activo: boolean;
-  orden: number;
   stripe_price_id: string | null;
   stripe_price_id_anual: string | null;
-  dias_prueba: number | null;
+  activo: boolean;
+  orden: number;
+  popular?: boolean;
 }
 
-interface CurrentSubscription {
-  plan_id: string;
-  estado: string;
+interface SubscriptionData {
+  subscription: any | null;
+  plan: Plan | null;
 }
 
-type LoadingState = "idle" | "loading" | "error" | "ready";
-type CheckoutState = "idle" | "redirecting" | "error";
+// ─── ANIMACIONES ───
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.15, delayChildren: 0.1 },
+  },
+};
 
-function formatPrice(cents: number | null, pesos: number | null): string {
-  if (cents && cents > 0) {
-    return `$${(cents / 100).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
-  }
-  if (pesos && pesos > 0) {
-    return `$${pesos.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
-  }
-  return "Gratis";
-}
+const cardVariants = {
+  hidden: { opacity: 0, y: 40, scale: 0.95 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { type: "spring", stiffness: 100, damping: 15 },
+  },
+};
 
+// ─── UTILIDADES ───
+const formatPrice = (centavos: number) => {
+  if (!centavos || centavos <= 0) return "$0";
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(centavos / 100);
+};
+
+const FALLBACK_PLANS: Plan[] = [
+  {
+    id: "basico",
+    nombre: "Básico",
+    descripcion: "Ideal para maestros que inician. Hasta 35 alumnos, registro de asistencia, planeaciones básicas y reportes simples.",
+    precio_mensual: 99,
+    precio_anual: 990,
+    precio_centavos: 9900,
+    precio_centavos_anual: 99000,
+    caracteristicas: [
+      "Hasta 35 alumnos",
+      "Registro de asistencia",
+      "Planeaciones básicas",
+      "Reportes simples",
+    ],
+    stripe_price_id: null,
+    stripe_price_id_anual: null,
+    activo: true,
+    orden: 1,
+  },
+  {
+    id: "profesional",
+    nombre: "Profesional",
+    descripcion: "Para maestros avanzados. Alumnos ilimitados, herramientas IA, generación de imágenes, planeaciones IA y reportes avanzados.",
+    precio_mensual: 199,
+    precio_anual: 1990,
+    precio_centavos: 19900,
+    precio_centavos_anual: 199000,
+    caracteristicas: [
+      "Alumnos ilimitados",
+      "Herramientas IA",
+      "Generación de imágenes IA",
+      "Planeaciones con IA",
+      "Comunicación con padres",
+      "Reportes avanzados",
+    ],
+    stripe_price_id: null,
+    stripe_price_id_anual: null,
+    activo: true,
+    orden: 2,
+    popular: true,
+  },
+  {
+    id: "institucional",
+    nombre: "Institucional",
+    descripcion: "Para escuelas e instituciones. Múltiples maestros, panel de director, reportes institucionales y soporte 24/7.",
+    precio_mensual: 499,
+    precio_anual: 4990,
+    precio_centavos: 49900,
+    precio_centavos_anual: 499000,
+    caracteristicas: [
+      "Múltiples maestros",
+      "Panel de director",
+      "Gestión de grupos",
+      "Reportes institucionales",
+      "Integración con SEP",
+    ],
+    stripe_price_id: null,
+    stripe_price_id_anual: null,
+    activo: true,
+    orden: 3,
+  },
+];
+
+// ─── COMPONENTE PRINCIPAL ───
 export default function SuscripcionPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const canceled = searchParams.get("canceled") === "true";
-
-  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
-  const [loadState, setLoadState] = useState<LoadingState>("idle");
-  const [checkoutState, setCheckoutState] = useState<CheckoutState>("idle");
-  const [activePlanId, setActivePlanId] = useState<string | null>(null);
-  const [currentSubscription, setCurrentSubscription] = useState<CurrentSubscription | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
+  const [user, setUser] = useState<any>(null);
   const [stripeConfigured, setStripeConfigured] = useState(false);
 
+  // ─── CARGAR DATOS ───
   const loadData = useCallback(async () => {
-    setLoadState("loading");
-    setErrorMsg(null);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const uid = sessionData?.session?.user?.id ?? null;
-      setUserId(uid);
+      setLoading(true);
 
-      const res = await fetch("/api/subscription-plans");
-      const plansJson = await res.json();
-
-      if (!res.ok || !plansJson.success) {
-        throw new Error(plansJson.error || "Error al cargar planes");
-      }
-
-      const normalizedPlans: SubscriptionPlan[] = (plansJson.data ?? []).map((p: any) => ({
-        ...p,
-        precio_centavos: p.precio_centavos ?? (p.precio_mensual ? p.precio_mensual * 100 : 0),
-        precio_centavos_anual: p.precio_centavos_anual ?? (p.precio_anual ? p.precio_anual * 100 : null),
-        stripe_price_id_anual: p.stripe_price_id_anual ?? null,
-        caracteristicas: p.caracteristicas ?? [],
-        dias_prueba: p.dias_prueba ?? 15,
-      }));
-
-      // Verificar si Stripe está configurado (algún plan tiene price_id válido)
-      const hasStripeIds = normalizedPlans.some(
-        (p) => p.stripe_price_id && p.stripe_price_id.startsWith("price_")
-      );
-      setStripeConfigured(hasStripeIds);
-
-      setPlans(normalizedPlans);
-
-      if (uid) {
-        const subRes = await fetch(`/api/user-subscription?user_id=${uid}`);
-        const subJson = await subRes.json();
-        if (subRes.ok && subJson.success && subJson.data?.subscription) {
-          setCurrentSubscription({
-            plan_id: subJson.data.subscription.plan_id ?? subJson.data.subscription.planId,
-            estado: subJson.data.subscription.estado,
-          });
-        }
-      }
-
-      setLoadState("ready");
-    } catch (err) {
-      console.error("[SuscripcionPage] Load error:", err);
-      setErrorMsg(err instanceof Error ? err.message : "Error desconocido");
-      setLoadState("error");
-    }
-  }, []);
-
-  useEffect(() => {
-    loadData();
-    if (canceled) {
-      toast.info("El pago fue cancelado. Puedes intentarlo de nuevo cuando quieras.", { duration: 5000 });
-    }
-  }, [loadData, canceled]);
-
-  const handleSubscribe = useCallback(async (plan: SubscriptionPlan, billing: "monthly" | "annual" = "monthly") => {
-    setCheckoutState("redirecting");
-    setActivePlanId(plan.id);
-    setErrorMsg(null);
-
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const uid = sessionData?.session?.user?.id;
-
-      if (!uid) {
-        toast.error("Debes iniciar sesión para suscribirte");
+      // 1. Verificar sesión
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        toast.info("Inicia sesión para ver los planes", { duration: 4000 });
         router.push("/login?redirect=/suscripcion");
         return;
       }
+      setUser(session.user);
 
-      const priceId = billing === "annual"
-        ? (plan.stripe_price_id_anual || plan.stripe_price_id)
-        : plan.stripe_price_id;
+      // 2. Cargar planes desde API
+      const plansRes = await fetch("/api/subscription-plans");
+      let plansData: Plan[] = [];
 
-      // ─── VALIDACIÓN FRONTEND: ¿Stripe configurado? ───
-      if (!priceId || !priceId.startsWith("price_")) {
-        setCheckoutState("error");
-        setActivePlanId(null);
-        toast.error(
-          `⚠️ El plan "${plan.nombre}" no tiene un precio de Stripe configurado. Contacta al administrador.`,
-          { duration: 6000 }
-        );
-        return;
+      if (plansRes.ok) {
+        const apiPlans = await plansRes.json();
+        plansData = apiPlans.plans?.map((p: any) => ({
+          ...p,
+          precio_centavos: p.precio_centavos || p.precio_mensual * 100 || 0,
+          precio_centavos_anual: p.precio_centavos_anual || p.precio_anual * 100 || 0,
+        })) || [];
       }
 
+      // Si la API falla o está vacía, usar fallback
+      if (plansData.length === 0) {
+        plansData = FALLBACK_PLANS;
+      }
+
+      // Verificar si Stripe está configurado (algún plan tiene price_id)
+      const hasStripeIds = plansData.some(p => p.stripe_price_id || p.stripe_price_id_anual);
+      setStripeConfigured(hasStripeIds);
+
+      setPlans(plansData);
+
+      // 3. Cargar suscripción actual
+      const subRes = await fetch(`/api/user-subscription?user_id=${session.user.id}`);
+      if (subRes.ok) {
+        const subData = await subRes.json();
+        setSubscription(subData.data || { subscription: null, plan: null });
+      }
+    } catch (err) {
+      console.error("[SuscripcionPage] Error cargando datos:", err);
+      setPlans(FALLBACK_PLANS);
+      toast.error("Error al cargar planes. Mostrando información básica.");
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // ─── CHECKOUT ───
+  const handleCheckout = async (plan: Plan) => {
+    if (!user) {
+      toast.error("Debes iniciar sesión para contratar un plan");
+      router.push("/login?redirect=/suscripcion");
+      return;
+    }
+
+    const priceId = billing === "annual" ? plan.stripe_price_id_anual : plan.stripe_price_id;
+
+    // ─── VALIDACIÓN CRÍTICA: ¿Stripe está configurado? ───
+    if (!priceId || !priceId.startsWith("price_")) {
+      toast.error(
+        `⚠️ El plan "${plan.nombre}" no tiene configurado un precio de Stripe. Contacta al administrador.`,
+        { duration: 6000 }
+      );
+      return;
+    }
+
+    setCheckoutLoading(plan.id);
+
+    try {
       const res = await fetch("/next_api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           price_id: priceId,
-          user_id: uid,
-          billing: billing === "annual" ? "year" : "month",
+          user_id: user.id,
+          billing,
           plan_id: plan.id,
         }),
       });
 
-      const json = await res.json();
+      const data = await res.json();
 
       if (!res.ok) {
-        setCheckoutState("error");
-        setActivePlanId(null);
-
-        if (json.code === "STRIPE_RESOURCE_MISSING") {
-          toast.error(`❌ ${json.error}. ${json.detail || ""}`, { duration: 8000 });
-        } else if (json.code === "INVALID_PRICE_ID") {
-          toast.error(`❌ ${json.error}. ${json.detail || ""}`, { duration: 8000 });
+        // Manejar errores específicos del backend
+        if (data.code === "STRIPE_PRICE_ID_MISSING") {
+          toast.error("❌ Este plan no tiene precio de Stripe configurado.", { duration: 5000 });
+        } else if (data.code === "STRIPE_RESOURCE_MISSING") {
+          toast.error(`❌ ${data.message}`, { duration: 6000 });
         } else {
-          toast.error(json.error || "Error al iniciar el pago");
+          toast.error(data.message || "Error al procesar el pago. Intenta de nuevo.");
         }
         return;
       }
 
-      if (json.url) {
+      if (data.url) {
         toast.success("Redirigiendo a Stripe para pago seguro... 🔒");
-        window.location.href = json.url;
+        window.location.href = data.url;
       } else {
-        throw new Error("No se recibió URL de checkout");
+        toast.error("No se pudo iniciar el checkout. Intenta de nuevo.");
       }
     } catch (err) {
-      console.error("[SuscripcionPage] Checkout error:", err);
-      setErrorMsg(err instanceof Error ? err.message : "Error al iniciar el pago");
-      setCheckoutState("error");
-      setActivePlanId(null);
-      toast.error(err instanceof Error ? err.message : "Error al iniciar el pago");
+      console.error("[Checkout Error]", err);
+      toast.error("Error de conexión. Verifica tu internet e intenta de nuevo.");
+    } finally {
+      setCheckoutLoading(null);
     }
-  }, [router]);
+  };
 
-  if (loadState === "loading") {
+  // ─── RENDER: ESTADO DE CARGA ───
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex items-center justify-center p-4">
-        <div className="text-center space-y-4">
-          <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto" />
-          <p className="text-muted-foreground font-medium">Cargando planes de suscripción...</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto mb-4" />
+          <p className="text-muted-foreground">Cargando planes...</p>
         </div>
       </div>
     );
   }
 
-  if (loadState === "error") {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full border-red-200 dark:border-red-800">
-          <CardContent className="pt-6 pb-6 text-center space-y-4">
-            <AlertTriangle className="w-12 h-12 text-red-500 mx-auto" />
-            <h2 className="text-xl font-bold text-red-700 dark:text-red-300">Error al cargar planes</h2>
-            <p className="text-muted-foreground text-sm">{errorMsg}</p>
-            <Button onClick={loadData} variant="outline" className="w-full gap-2">
-              <RefreshCw className="w-4 h-4" /> Reintentar
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const currentPlanId = subscription?.plan?.id;
+  const isTrialing = subscription?.subscription?.estado === "trialing";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 py-12 px-4">
-      <div className="max-w-6xl mx-auto space-y-10">
-        {/* Header */}
-        <div className="text-center space-y-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20">
+      {/* ─── HEADER ─── */}
+      <div className="relative overflow-hidden bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-500 text-white">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wNSI+PHBhdGggZD0iTTM2IDM0aDR2NGgtNHpNMjAgMjBoNHY0aC00eiIvPjwvZz48L2c+PC9zdmc+')] opacity-30" />
+        <div className="container mx-auto px-4 py-16 relative">
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.6 }}
+            className="text-center max-w-3xl mx-auto"
           >
-            <Badge variant="secondary" className="mb-2 text-sm">
-              <Crown className="w-3 h-3 mr-1" />
-              Elige tu plan ideal
+            <Badge className="mb-4 bg-white/20 text-white border-white/30 backdrop-blur-sm">
+              <Sparkles className="w-3 h-3 mr-1" /> NEM Compatible
             </Badge>
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-              Suscripciones PlaneaDocente
+            <h1 className="text-4xl md:text-5xl font-bold mb-4 tracking-tight">
+              Planes para la <span className="text-yellow-300">Nueva Escuela Mexicana</span>
             </h1>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto mt-2">
-              Desbloquea todo el potencial de tu planeación educativa con herramientas profesionales
-              diseñadas para la Nueva Escuela Mexicana.
+            <p className="text-lg text-blue-100 max-w-2xl mx-auto leading-relaxed">
+              Herramientas profesionales de planeación didáctica, gestión de alumnos y reportes SEP.
+              Diseñados para maestros, directores e instituciones educativas.
             </p>
           </motion.div>
         </div>
+      </div>
 
-        {/* ALERTA: STRIPE NO CONFIGURADO */}
+      <div className="container mx-auto px-4 py-12 max-w-7xl">
+        {/* ─── BANNER DE SUSCRIPCIÓN ACTIVA ─── */}
+        <AnimatePresence>
+          {subscription?.subscription && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-8"
+            >
+              <Card className="bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200">
+                <CardContent className="p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
+                      <Check className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-emerald-800">
+                        Ya tienes una suscripción <span className="capitalize">{subscription.subscription.estado}</span>.
+                      </p>
+                      <p className="text-sm text-emerald-600">
+                        Puedes cambiar de plan o gestionarla desde tu dashboard.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => router.push("/dashboard")}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    Ir al Dashboard <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ─── ALERTA: STRIPE NO CONFIGURADO ─── */}
         {!stripeConfigured && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="max-w-3xl mx-auto"
+            className="mb-8"
           >
-            <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/30">
-              <CardContent className="p-5">
+            <Card className="bg-amber-50 border-amber-200">
+              <CardContent className="p-6">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
                   <div className="flex-1">
-                    <h3 className="font-semibold text-amber-800 dark:text-amber-300 text-sm">
+                    <h3 className="font-semibold text-amber-800 mb-1">
                       ⚠️ Pagos temporalmente deshabilitados
                     </h3>
-                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                    <p className="text-sm text-amber-700 mb-3">
                       Los planes muestran precios correctamente, pero aún no están conectados con Stripe.
                       Los botones de pago están deshabilitados hasta que el administrador configure los price_id.
                     </p>
-                    <div className="mt-3 bg-white/60 dark:bg-black/20 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-300 space-y-1">
-                      <p className="font-medium">Para activar pagos:</p>
+                    <div className="bg-white/60 rounded-lg p-3 text-xs text-amber-800 space-y-1">
+                      <p className="font-medium">Para activar pagos, el administrador debe:</p>
                       <ol className="list-decimal list-inside space-y-0.5 ml-1">
-                        <li>Ve a <a href="https://dashboard.stripe.com/products" target="_blank" rel="noopener noreferrer" className="underline font-semibold">Stripe Dashboard → Products</a></li>
-                        <li>Crea 3 productos (Básico $99, Profesional $199, Institucional $499)</li>
-                        <li>Copia los <code>price_...</code> IDs a la tabla <code>subscription_plans</code> en Supabase</li>
-                        <li>Verifica que <code>STRIPE_SECRET_KEY</code> esté en Vercel</li>
+                        <li>Crear productos en Stripe Dashboard</li>
+                        <li>Copiar los <code>price_...</code> IDs a la tabla <code>subscription_plans</code> en Supabase</li>
+                        <li>Verificar que <code>STRIPE_SECRET_KEY</code> esté en Vercel</li>
                       </ol>
                     </div>
                   </div>
@@ -279,259 +382,223 @@ export default function SuscripcionPage() {
           </motion.div>
         )}
 
-        {/* Banner login requerido */}
-        {!userId && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="max-w-2xl mx-auto"
-          >
-            <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/30">
-              <CardContent className="py-4 flex items-center gap-3 justify-center flex-wrap">
-                <LogIn className="w-5 h-5 text-blue-600" />
-                <p className="text-sm text-blue-800 dark:text-blue-300">
-                  <span className="font-semibold">Inicia sesión</span> para suscribirte y comenzar tu prueba gratuita.
-                </p>
-                <Button size="sm" variant="outline" onClick={() => router.push("/login?redirect=/suscripcion")}>
-                  Entrar
-                </Button>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
+        {/* ─── SELECTOR MENSUAL/ANUAL ─── */}
+        <div className="flex justify-center mb-10">
+          <div className="bg-white rounded-full p-1.5 shadow-lg border flex items-center gap-2">
+            <button
+              onClick={() => setBilling("monthly")}
+              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all ${
+                billing === "monthly"
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Mensual
+            </button>
+            <button
+              onClick={() => setBilling("annual")}
+              className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${
+                billing === "annual"
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Anual
+              <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs">
+                -20%
+              </Badge>
+            </button>
+          </div>
+        </div>
 
-        {/* Banner si ya tiene suscripción */}
-        {currentSubscription && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="max-w-2xl mx-auto"
-          >
-            <Card className="border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/30">
-              <CardContent className="py-4 flex items-center gap-3 justify-center flex-wrap">
-                <Check className="w-5 h-5 text-green-600" />
-                <p className="text-sm text-green-800 dark:text-green-300">
-                  Ya tienes una suscripción{" "}
-                  <span className="font-semibold capitalize">
-                    {currentSubscription.estado.replace("_", " ")}
-                  </span>
-                  . Puedes cambiar de plan o gestionarla desde tu dashboard.
-                </p>
-                <Button size="sm" onClick={() => router.push("/dashboard")}>
-                  Dashboard
-                </Button>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {/* Error de checkout */}
-        {errorMsg && checkoutState === "error" && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="max-w-2xl mx-auto"
-          >
-            <Card className="border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/30">
-              <CardContent className="py-4 text-center">
-                <p className="text-sm text-red-700 dark:text-red-300 font-medium">{errorMsg}</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {/* Grid de planes */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
-          {plans.map((plan, index) => {
-            const isPopular = plan.nombre.toLowerCase().includes("profesional");
-            const isInstitutional = plan.nombre.toLowerCase().includes("institucional");
-            const isCurrent = currentSubscription?.plan_id === plan.id;
-
-            const monthlyPrice = plan.precio_centavos ?? plan.precio_mensual ?? 0;
-            const annualPrice = plan.precio_centavos_anual ?? plan.precio_anual ?? 0;
-            const hasRealPrice = monthlyPrice > 0;
-            const hasStripePrice = !!plan.stripe_price_id && plan.stripe_price_id.startsWith("price_");
-            const canSubscribe = hasStripePrice && !!userId;
-            const isFreePlan = !hasRealPrice && !hasStripePrice;
-            const isProcessing = checkoutState === "redirecting" && activePlanId === plan.id;
+        {/* ─── GRID DE PLANES ─── */}
+        <motion.div
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+          className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8"
+        >
+          {plans.map((plan) => {
+            const isCurrentPlan = currentPlanId === plan.id;
+            const price = billing === "annual" ? plan.precio_centavos_anual : plan.precio_centavos;
+            const priceId = billing === "annual" ? plan.stripe_price_id_anual : plan.stripe_price_id;
+            const hasValidPrice = priceId && priceId.startsWith("price_");
+            const isProcessing = checkoutLoading === plan.id;
 
             return (
-              <motion.div
-                key={plan.id}
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.15, duration: 0.5 }}
-              >
+              <motion.div key={plan.id} variants={cardVariants}>
                 <Card
                   className={`relative h-full flex flex-col transition-all duration-300 hover:shadow-xl ${
-                    isPopular
-                      ? "border-primary shadow-lg scale-[1.02] md:scale-105"
-                      : "border-slate-200 dark:border-slate-800"
-                  } ${isCurrent ? "ring-2 ring-green-500 dark:ring-green-400" : ""}`}
+                    plan.popular
+                      ? "border-indigo-400 shadow-lg shadow-indigo-100 scale-[1.02] md:scale-105"
+                      : "border-slate-200 hover:border-slate-300"
+                  } ${isCurrentPlan ? "ring-2 ring-emerald-400 ring-offset-2" : ""}`}
                 >
-                  {isPopular && (
+                  {/* Badge Popular */}
+                  {plan.popular && (
                     <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                      <Badge className="bg-primary text-primary-foreground px-3 py-1 text-xs font-bold shadow-md">
-                        <Sparkles className="w-3 h-3 mr-1" />
-                        Más Popular
+                      <Badge className="bg-gradient-to-r from-indigo-600 to-blue-600 text-white border-0 px-4 py-1 shadow-md">
+                        <Crown className="w-3 h-3 mr-1" /> Más Popular
                       </Badge>
                     </div>
                   )}
 
-                  <CardHeader className="pb-2 pt-6 text-center">
-                    <div className="flex justify-center mb-3">
-                      {isInstitutional ? (
-                        <Building2 className="w-10 h-10 text-purple-500" />
-                      ) : isPopular ? (
-                        <Zap className="w-10 h-10 text-amber-500" />
-                      ) : (
-                        <Check className="w-10 h-10 text-slate-500" />
-                      )}
+                  {/* Badge Plan Actual */}
+                  {isCurrentPlan && (
+                    <div className="absolute -top-3 right-4">
+                      <Badge className="bg-emerald-500 text-white border-0 px-3 py-1 shadow-md">
+                        <Check className="w-3 h-3 mr-1" /> Plan Actual
+                      </Badge>
                     </div>
-                    <h3 className="text-2xl font-bold">{plan.nombre}</h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {plan.descripcion || "Plan de suscripción"}
-                    </p>
-                  </CardHeader>
+                  )}
 
-                  <CardContent className="flex-1 flex flex-col space-y-6">
-                    {/* Precio */}
-                    <div className="text-center space-y-1">
-                      <div className="flex items-baseline justify-center gap-1">
-                        <span className="text-4xl font-extrabold tracking-tight">
-                          {formatPrice(plan.precio_centavos, plan.precio_mensual)}
-                        </span>
-                        {hasRealPrice && (
-                          <span className="text-muted-foreground">MXN/mes</span>
+                  <CardContent className="p-6 flex-1 flex flex-col">
+                    {/* Icono y nombre */}
+                    <div className="text-center mb-6">
+                      <div
+                        className={`w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center ${
+                          plan.id === "basico"
+                            ? "bg-blue-100 text-blue-600"
+                            : plan.id === "profesional"
+                            ? "bg-indigo-100 text-indigo-600"
+                            : "bg-purple-100 text-purple-600"
+                        }`}
+                      >
+                        {plan.id === "basico" ? (
+                          <GraduationCap className="w-7 h-7" />
+                        ) : plan.id === "profesional" ? (
+                          <Zap className="w-7 h-7" />
+                        ) : (
+                          <Building2 className="w-7 h-7" />
                         )}
                       </div>
-                      {annualPrice > 0 && (
-                        <p className="text-xs text-muted-foreground">
-                          o {formatPrice(plan.precio_centavos_anual, plan.precio_anual)} MXN/año
+                      <h3 className="text-xl font-bold text-slate-900">{plan.nombre}</h3>
+                      <p className="text-sm text-slate-500 mt-1 leading-relaxed">{plan.descripcion}</p>
+                    </div>
+
+                    {/* Precio */}
+                    <div className="text-center mb-6">
+                      <div className="flex items-baseline justify-center gap-1">
+                        <span className="text-4xl font-extrabold text-slate-900">
+                          {formatPrice(price)}
+                        </span>
+                        <span className="text-slate-500 text-sm font-medium">
+                          MXN/{billing === "annual" ? "año" : "mes"}
+                        </span>
+                      </div>
+                      {billing === "annual" && plan.precio_centavos > 0 && (
+                        <p className="text-xs text-green-600 mt-1 font-medium">
+                          Ahorras {formatPrice(plan.precio_centavos * 12 - plan.precio_centavos_anual)} al año
                         </p>
                       )}
-                      {!hasRealPrice && !isFreePlan && (
-                        <p className="text-xs text-amber-600 flex items-center justify-center gap-1 mt-1">
-                          <AlertCircle className="w-3 h-3" />
-                          Precio pendiente de configuración
-                        </p>
-                      )}
-                      {plan.dias_prueba && plan.dias_prueba > 0 && hasRealPrice && (
-                        <p className="text-xs text-green-600 font-medium mt-1 flex items-center justify-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {plan.dias_prueba} días de prueba gratis
-                        </p>
-                      )}
+                      <div className="flex items-center justify-center gap-1 mt-2 text-xs text-amber-600">
+                        <Clock className="w-3 h-3" />
+                        <span>15 días de prueba gratis</span>
+                      </div>
                     </div>
 
                     {/* Características */}
-                    <ul className="space-y-3 flex-1">
-                      {plan.caracteristicas.map((feature, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm">
-                          <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                          <span className="text-slate-700 dark:text-slate-300">{feature}</span>
+                    <ul className="space-y-3 mb-8 flex-1">
+                      {plan.caracteristicas.map((feature, idx) => (
+                        <li key={idx} className="flex items-start gap-2.5 text-sm text-slate-600">
+                          <Check className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
+                          <span className="leading-relaxed">{feature}</span>
                         </li>
                       ))}
-                      {plan.caracteristicas.length === 0 && (
-                        <li className="text-sm text-muted-foreground italic">
-                          Características no configuradas
-                        </li>
-                      )}
                     </ul>
 
-                    {/* Botones de acción */}
+                    {/* Botón de acción */}
                     <div className="space-y-2">
-                      {isCurrent ? (
+                      {isCurrentPlan ? (
+                        <Button
+                          variant="outline"
+                          className="w-full border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                          onClick={() => router.push("/dashboard")}
+                        >
+                          <Check className="w-4 h-4 mr-2" /> Plan Activo — Ir al Dashboard
+                        </Button>
+                      ) : !hasValidPrice ? (
                         <Button
                           disabled
-                          className="w-full gap-2 bg-green-600 hover:bg-green-600 cursor-default"
+                          className="w-full bg-slate-200 text-slate-500 cursor-not-allowed"
                         >
-                          <Check className="w-4 h-4" />
-                          Plan Actual
+                          <AlertTriangle className="w-4 h-4 mr-2" />
+                          Configuración de pago pendiente
                         </Button>
                       ) : (
-                        <>
-                          <Button
-                            onClick={() => handleSubscribe(plan, "monthly")}
-                            disabled={isProcessing || !canSubscribe}
-                            className={`w-full gap-2 ${
-                              isPopular ? "bg-primary hover:bg-primary/90" : ""
-                            } ${!canSubscribe ? "bg-slate-200 text-slate-500 cursor-not-allowed hover:bg-slate-200" : ""}`}
-                          >
-                            {isProcessing ? (
-                              <>
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                Redirigiendo...
-                              </>
-                            ) : !userId ? (
-                              "Inicia sesión para suscribirte"
-                            ) : isFreePlan ? (
-                              "Activar gratis"
-                            ) : !hasStripePrice ? (
-                              <>
-                                <AlertCircle className="w-4 h-4" />
-                                Configuración pendiente
-                              </>
-                            ) : (
-                              <>
-                                Elegir Plan
-                                <ArrowRight className="w-4 h-4" />
-                              </>
-                            )}
-                          </Button>
-
-                          {annualPrice > 0 && hasStripePrice && (
-                            <Button
-                              onClick={() => handleSubscribe(plan, "annual")}
-                              disabled={isProcessing || !canSubscribe}
-                              variant="outline"
-                              className="w-full gap-2 text-xs"
-                            >
-                              Pagar anual (ahorro incluido)
-                            </Button>
+                        <Button
+                          onClick={() => handleCheckout(plan)}
+                          disabled={isProcessing}
+                          className={`w-full transition-all ${
+                            plan.popular
+                              ? "bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white shadow-md hover:shadow-lg"
+                              : "bg-slate-900 hover:bg-slate-800 text-white"
+                          }`}
+                        >
+                          {isProcessing ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Procesando...
+                            </>
+                          ) : (
+                            <>
+                              Elegir Plan <ArrowRight className="w-4 h-4 ml-2" />
+                            </>
                           )}
-                        </>
+                        </Button>
                       )}
 
-                      {/* Mensajes informativos debajo del botón */}
-                      {!hasStripePrice && userId && !isFreePlan && (
-                        <p className="text-xs text-center text-amber-600 flex items-center justify-center gap-1">
-                          <Info className="w-3 h-3" />
-                          Plan pendiente de configuración de pago.
-                        </p>
-                      )}
-
-                      {canSubscribe && (
-                        <p className="text-[10px] text-center text-slate-400 flex items-center justify-center gap-1">
-                          <Shield className="w-3 h-3" />
-                          Pago seguro por Stripe · Cancela cuando quieras
-                        </p>
-                      )}
+                      {/* Mensaje de seguridad */}
+                      <div className="flex items-center justify-center gap-1 text-[10px] text-slate-400">
+                        <Shield className="w-3 h-3" />
+                        <span>Pago seguro por Stripe · Cancela cuando quieras</span>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
               </motion.div>
             );
           })}
-        </div>
+        </motion.div>
 
-        {/* Footer de confianza */}
-        <div className="text-center space-y-2 pt-8 border-t border-slate-200 dark:border-slate-800">
-          <p className="text-sm text-muted-foreground">
-            Pagos procesados de forma segura por{" "}
-            <span className="font-semibold text-slate-700 dark:text-slate-300">Stripe</span>.
-            Puedes cancelar tu suscripción en cualquier momento desde tu dashboard.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            ¿Tienes dudas? Escríbenos a{" "}
-            <a
-              href="mailto:soporte@planeadocente.com"
-              className="underline hover:text-primary transition-colors"
-            >
-              soporte@planeadocente.com
-            </a>
-          </p>
-        </div>
+        {/* ─── FAQ / INFO ─── */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.6 }}
+          className="mt-16 max-w-3xl mx-auto"
+        >
+          <h2 className="text-2xl font-bold text-center text-slate-900 mb-8">
+            Preguntas frecuentes
+          </h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            {[
+              {
+                q: "¿Puedo cancelar en cualquier momento?",
+                a: "Sí. Cancela desde tu dashboard y seguirás con acceso hasta el final del periodo pagado.",
+              },
+              {
+                q: "¿Qué incluye la prueba gratuita?",
+                a: "15 días con todas las funciones del plan Profesional. Sin tarjeta de crédito.",
+              },
+              {
+                q: "¿Cumplen con la NEM?",
+                a: "Sí. Todos nuestros formatos y reportes siguen los lineamientos oficiales de la SEP.",
+              },
+              {
+                q: "¿Puedo cambiar de plan?",
+                a: "Claro. Upgrade o downgrade en cualquier momento desde tu dashboard.",
+              },
+            ].map((faq, i) => (
+              <Card key={i} className="border-slate-200">
+                <CardContent className="p-4">
+                  <h4 className="font-semibold text-slate-900 text-sm mb-1">{faq.q}</h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">{faq.a}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </motion.div>
       </div>
     </div>
   );
