@@ -2,17 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
+// ─── VALIDACIÓN DE ENTORNO ───
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!STRIPE_SECRET_KEY) {
+  console.error("[Checkout] FATAL: STRIPE_SECRET_KEY no está configurado");
+}
+if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+  console.error("[Checkout] FATAL: Variables de Supabase no configuradas");
+}
+
 // ─── STRIPE CLIENT ───
-// NOTA: Si tu paquete stripe tiene una apiVersion tipada específica,
-// usa esa o quita apiVersion para que Stripe use la última automáticamente.
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-03-31.basil" as any,
+// No especificamos apiVersion para que Stripe use la última estable automáticamente
+const stripe = new Stripe(STRIPE_SECRET_KEY || "sk_test_placeholder", {
+  typescript: true,
 });
 
 // ─── SUPABASE ADMIN CLIENT ───
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  SUPABASE_URL || "",
+  SUPABASE_SERVICE_KEY || "",
   {
     auth: { autoRefreshToken: false, persistSession: false },
   }
@@ -20,57 +31,92 @@ const supabaseAdmin = createClient(
 
 /**
  * POST /next_api/stripe/checkout
- * Crea una sesión de Stripe Checkout con validación completa.
+ * Crea una sesión de Stripe Checkout con validación completa y seguridad reforzada.
  * 
- * Payload esperado: { price_id, user_id, billing, plan_id }
+ * Payload esperado: { price_id, billing?, plan_id }
+ * NOTA: user_id se obtiene EXCLUSIVAMENTE de la sesión autenticada. Nunca del body.
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-
-    // ── Detectar y normalizar payload ────────────────────────────────────
-    let priceId: string | null = null;
-    let userId: string | null = null;
-    let planId: string | null = null;
-    let billing: "month" | "year" = "month";
-
-    if (body.price_id) {
-      priceId = body.price_id;
-      userId = body.user_id ?? body.userId ?? null;
-      planId = body.plan_id ?? body.planId ?? null;
-      billing = body.billing === "year" || body.billing === "annual" ? "year" : "month";
-    } else if (body.amount || body.productName) {
+    // ── 1. VERIFICAR ENTORNO ────────────────────────────────────────────
+    if (!STRIPE_SECRET_KEY || STRIPE_SECRET_KEY === "sk_test_placeholder") {
       return NextResponse.json(
         {
           success: false,
-          error: "Formato obsoleto. El frontend debe enviar price_id (ID de precio de Stripe).",
-          code: "LEGACY_FORMAT",
+          error: "Stripe no está configurado en el servidor.",
+          code: "STRIPE_NOT_CONFIGURED",
+          detail: "Agrega STRIPE_SECRET_KEY a las variables de entorno de Vercel.",
         },
+        { status: 500 }
+      );
+    }
+
+    // ── 2. OBTENER USUARIO AUTENTICADO (SOLO del token, NUNCA del body) ──
+    let userId: string | null = null;
+    let userEmail: string | null = null;
+    let userName: string | null = null;
+
+    // Intentar obtener de Authorization header
+    const authHeader = req.headers.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.replace("Bearer ", "");
+      const { data: userData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+      if (!authErr && userData.user) {
+        userId = userData.user.id;
+        userEmail = userData.user.email || null;
+      }
+    }
+
+    // Fallback: obtener de cookie session
+    if (!userId) {
+      const { data: sessionData, error: sessionErr } = await supabaseAdmin.auth.getSession();
+      if (!sessionErr && sessionData?.session?.user) {
+        userId = sessionData.session.user.id;
+        userEmail = sessionData.session.user.email || null;
+      }
+    }
+
+    if (!userId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Debes iniciar sesión para realizar un pago.",
+          code: "UNAUTHENTICATED",
+        },
+        { status: 401 }
+      );
+    }
+
+    // ── 3. PARSEAR Y VALIDAR BODY ──────────────────────────────────────
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Body JSON inválido", code: "INVALID_JSON" },
         { status: 400 }
       );
     }
 
-    // ── VALIDACIONES ─────────────────────────────────────────────────────
+    const priceId = body.price_id;
+    const planId = body.plan_id ?? body.planId ?? null;
+    const billing: "month" | "year" =
+      body.billing === "year" || body.billing === "annual" ? "year" : "month";
+
+    // ── 4. VALIDAR PRICE_ID ─────────────────────────────────────────────
     if (!priceId || typeof priceId !== "string" || !priceId.startsWith("price_")) {
       return NextResponse.json(
         {
           success: false,
           error: "El price_id es inválido o no está configurado para este plan.",
           code: "INVALID_PRICE_ID",
-          detail: "Ve a Stripe Dashboard → Products, crea precios, y copia los price_... IDs a la tabla subscription_plans en Supabase.",
+          detail: "Ve a Stripe Dashboard → Products, crea precios, y copia los price_... IDs a Supabase.",
         },
         { status: 400 }
       );
     }
 
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "user_id es requerido", code: "MISSING_USER_ID" },
-        { status: 400 }
-      );
-    }
-
-    // ── VERIFICAR QUE EL PRICE_ID EXISTE EN STRIPE ────────────────────────
+    // ── 5. VERIFICAR QUE EL PRICE_ID EXISTE EN STRIPE ────────────────────
     try {
       await stripe.prices.retrieve(priceId);
     } catch (stripeErr: any) {
@@ -88,52 +134,61 @@ export async function POST(req: NextRequest) {
       throw stripeErr;
     }
 
-    // ── OBTENER DATOS DEL USUARIO DESDE SUPABASE ──────────────────────────
+    // ── 6. OBTENER PERFIL DEL USUARIO ────────────────────────────────────
     const { data: profile, error: profileError } = await supabaseAdmin
       .from("profiles")
-      .select("email, full_name, avatar_url")
+      .select("email, full_name, avatar_url, stripe_customer_id")
       .eq("id", userId)
-      .single();
-
-    if (profileError || !profile) {
-      console.error("[Checkout] Perfil no encontrado:", profileError);
-      return NextResponse.json(
-        { success: false, error: "Usuario no encontrado en la base de datos", code: "USER_NOT_FOUND" },
-        { status: 404 }
-      );
-    }
-
-    // ── CREAR O RECUPERAR CUSTOMER EN STRIPE ──────────────────────────────
-    let customerId: string | undefined = undefined;
-
-    const { data: existingSub } = await supabaseAdmin
-      .from("subscriptions")
-      .select("stripe_customer_id")
-      .eq("user_id", userId)
-      .not("stripe_customer_id", "is", null)
       .maybeSingle();
 
-    if (existingSub?.stripe_customer_id) {
-      customerId = existingSub.stripe_customer_id;
-    } else {
+    if (profileError) {
+      console.error("[Checkout] Error consultando perfil:", profileError);
+    }
+
+    userEmail = profile?.email || userEmail;
+    userName = profile?.full_name || null;
+
+    // ── 7. CREAR O RECUPERAR CUSTOMER EN STRIPE ─────────────────────────
+    let customerId: string | undefined = undefined;
+
+    // Primero intentar usar el guardado en profiles
+    if (profile?.stripe_customer_id) {
+      try {
+        await stripe.customers.retrieve(profile.stripe_customer_id);
+        customerId = profile.stripe_customer_id;
+      } catch {
+        console.warn("[Checkout] Customer Stripe guardado no existe, creando nuevo...");
+      }
+    }
+
+    // Si no hay customerId válido, crear uno nuevo
+    if (!customerId) {
       const customer = await stripe.customers.create({
-        email: profile.email,
-        name: profile.full_name || undefined,
-        metadata: { user_id: userId, plan_id: planId || "" },
+        email: userEmail || undefined,
+        name: userName || undefined,
+        metadata: {
+          supabase_user_id: userId,
+          plan_id: planId || "",
+          source: "planeadocente_checkout",
+        },
       });
       customerId = customer.id;
 
-      // Guardar customer_id para futuras referencias
-      await supabaseAdmin
-        .from("subscriptions")
+      // Guardar en profiles para futuras referencias
+      const { error: updateErr } = await supabaseAdmin
+        .from("profiles")
         .update({ stripe_customer_id: customerId })
-        .eq("user_id", userId);
+        .eq("id", userId);
+
+      if (updateErr) {
+        console.error("[Checkout] No se pudo guardar stripe_customer_id en profiles:", updateErr);
+      }
     }
 
-    // ── CONSTRUIR URLS ────────────────────────────────────────────────────
+    // ── 8. CONSTRUIR URLS ──────────────────────────────────────────────
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://planeadocente.com";
 
-    // ── CREAR SESIÓN DE CHECKOUT ─────────────────────────────────────────
+    // ── 9. CREAR SESIÓN DE CHECKOUT ─────────────────────────────────────
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: "subscription",
@@ -151,11 +206,13 @@ export async function POST(req: NextRequest) {
         user_id: userId,
         plan_id: planId || "",
         billing,
+        app: "planeadocente",
       },
       subscription_data: {
         metadata: {
           user_id: userId,
           plan_id: planId || "",
+          app: "planeadocente",
         },
         trial_period_days: billing === "month" ? 15 : 0,
       },
@@ -166,6 +223,7 @@ export async function POST(req: NextRequest) {
           message: "🔒 Pago seguro procesado por Stripe. Cancela cuando quieras.",
         },
       },
+      locale: "es",
     });
 
     return NextResponse.json({
@@ -175,7 +233,7 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (err: any) {
-    console.error("[Stripe Checkout] Error:", err);
+    console.error("[Stripe Checkout] Error fatal:", err);
 
     if (err.type === "StripeAuthenticationError") {
       return NextResponse.json(
