@@ -1,15 +1,30 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { supabaseAdmin } from "@/integrations/supabase/server";
+import { getSupabaseAdmin } from "@/integrations/supabase/server";
 
 export const dynamic = 'force-dynamic';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-  apiVersion: '2026-04-22.dahlia',
-});
+// ── Stripe LAZY (no inicializa si no hay key, evita crash en build) ──
+function getStripe(): Stripe | null {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) {
+    console.warn("[webhook] STRIPE_SECRET_KEY no configurado.");
+    return null;
+  }
+  return new Stripe(key, {
+    apiVersion: '2026-04-22.dahlia',
+  });
+}
 
 export async function POST(req: Request) {
+  const stripe = getStripe();
+
+  // ── VALIDAR CONFIGURACIÓN ──────────────────────────────────────────────
+  if (!stripe) {
+    return NextResponse.json({ error: "Stripe no configurado" }, { status: 503 });
+  }
+
   const body = await req.text();
   const headersList = await headers();
   const signature = headersList.get("stripe-signature");
@@ -36,10 +51,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
   }
 
-  // ── 2. PROCESAR EVENTO ────────────────────────────────────────────────────
+  // ── 2. OBTENER CLIENTE SUPABASE ADMIN (lazy, dentro del handler) ────────
+  let supabaseAdmin;
+  try {
+    supabaseAdmin = getSupabaseAdmin();
+  } catch (err: any) {
+    console.error("❌ Webhook: Supabase admin no disponible:", err.message);
+    return NextResponse.json({ error: "Supabase admin no configurado" }, { status: 503 });
+  }
+
+  // ── 3. PROCESAR EVENTO ────────────────────────────────────────────────────
   try {
     switch (event.type) {
-      
+
       // ═══════════════════════════════════════════════════════════════════════
       // CHECKOUT COMPLETADO → Usuario pagó / inició prueba
       // ═══════════════════════════════════════════════════════════════════════
@@ -49,20 +73,19 @@ export async function POST(req: Request) {
         const customerId = session.customer as string;
         const subscriptionId = session.subscription as string;
         const metadata = session.metadata || {};
-        const { planId, interval } = metadata;
+        const { planId } = metadata;
 
         if (!userId || !subscriptionId || !planId) {
           console.error("❌ Webhook: Datos incompletos en checkout.session.completed", {
             userId, subscriptionId, planId, sessionId: session.id
           });
-          // Devolvemos 200 para que Stripe no reintente (el problema no se soluciona reintentando)
           return NextResponse.json({ error: "Missing data" }, { status: 200 });
         }
 
         const trialEnd = new Date();
         trialEnd.setDate(trialEnd.getDate() + 15);
 
-        // 2.1 Actualizar perfil del usuario
+        // 3.1 Actualizar perfil del usuario
         const { error: profileError } = await supabaseAdmin
           .from("profiles")
           .update({
@@ -74,10 +97,9 @@ export async function POST(req: Request) {
 
         if (profileError) {
           console.error("❌ Webhook: Error actualizando perfil:", profileError.message);
-          // No devolvemos error a Stripe para evitar reintentos infinitos
         }
 
-        // 2.2 Guardar/actualizar suscripción
+        // 3.2 Guardar/actualizar suscripción
         const { error: subError } = await supabaseAdmin
           .from("subscriptions")
           .upsert(
@@ -102,10 +124,10 @@ export async function POST(req: Request) {
           console.log(`✅ Webhook: Usuario ${userId} (${planId}) en prueba hasta ${trialEnd.toISOString()}`);
         }
 
-        // 2.3 LÓGICA DE AFILIADOS (con manejo seguro de null)
+        // 3.3 LÓGICA DE AFILIADOS (con manejo seguro de null)
         try {
           const customerEmail = session.customer_details?.email || session.customer_email;
-          
+
           if (customerEmail) {
             const { data: referral } = await supabaseAdmin
               .from('affiliate_referrals')
@@ -115,7 +137,6 @@ export async function POST(req: Request) {
               .maybeSingle();
 
             if (referral) {
-              // Marcar como suscrito
               await supabaseAdmin
                 .from('affiliate_referrals')
                 .update({ 
@@ -124,21 +145,15 @@ export async function POST(req: Request) {
                 })
                 .eq('email_referido', customerEmail);
 
-              // Calcular comisión (20% del monto total)
               const amountTotal = session.amount_total || 0;
               const commissionCents = Math.round(amountTotal * 0.2);
 
-              // Actualizar estadísticas del afiliado
-              const { error: rpcError } = await supabaseAdmin.rpc('increment_affiliate_stats', {
+              await supabaseAdmin.rpc('increment_affiliate_stats', {
                 p_affiliate_id: referral.affiliate_id,
                 p_commission_cents: commissionCents
               });
 
-              if (rpcError) {
-                console.error("❌ Webhook: Error actualizando estadísticas de afiliado:", rpcError);
-              } else {
-                console.log(`✅ Webhook: Comisión acreditada: ${commissionCents} centavos para afiliado ${referral.affiliate_id}`);
-              }
+              console.log(`✅ Webhook: Comisión acreditada: ${commissionCents} centavos para afiliado ${referral.affiliate_id}`);
             } else {
               console.log(`ℹ️ Webhook: No hay referido registrado para ${customerEmail}`);
             }
@@ -146,7 +161,6 @@ export async function POST(req: Request) {
             console.log(`ℹ️ Webhook: No se encontró email del cliente en session`);
           }
         } catch (affError: any) {
-          // Si falla la lógica de afiliados, NO afecta la suscripción principal
           console.error("❌ Webhook: Error en lógica de afiliados (no crítico):", affError.message);
         }
 
@@ -166,7 +180,6 @@ export async function POST(req: Request) {
           return NextResponse.json({ received: true }, { status: 200 });
         }
 
-        // Obtener suscripción actual en Stripe
         let stripeSubscription;
         try {
           stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
@@ -178,7 +191,6 @@ export async function POST(req: Request) {
         const status = stripeSubscription.status;
         const currentPeriodEnd = (stripeSubscription as any).current_period_end as number;
 
-        // Actualizar estado: si era trialing y ahora es active, se actualiza
         const { error: updateError } = await supabaseAdmin
           .from("subscriptions")
           .update({
@@ -192,7 +204,6 @@ export async function POST(req: Request) {
           console.error("❌ Webhook: Error actualizando suscripción:", updateError.message);
         }
 
-        // Asegurar que el usuario sigue siendo PRO
         await supabaseAdmin
           .from("profiles")
           .update({ is_pro: true })
@@ -226,13 +237,12 @@ export async function POST(req: Request) {
           console.error("❌ Webhook: Error en subscription.updated:", updateError.message);
         }
 
-        // Si la suscripción se cancela o queda impaga, quitar PRO
         if (status === "canceled" || status === "unpaid" || status === "incomplete_expired") {
           await supabaseAdmin
             .from("profiles")
             .update({ is_pro: false })
             .eq("stripe_customer_id", subscription.customer as string);
-          
+
           console.log(`⚠️ Webhook: Suscripción ${subscriptionId} cancelada/impaga. is_pro = false`);
         }
 
@@ -269,7 +279,7 @@ export async function POST(req: Request) {
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
         const customerId = invoice.customer as string;
-        
+
         console.warn(`⚠️ Webhook: Pago fallido para customer ${customerId}`);
 
         const subscriptionId = (invoice as any).subscription as string;
@@ -296,7 +306,6 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("❌ Webhook: Error general procesando evento:", error);
-    // Devolvemos 500 solo si es un error inesperado nuestro
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

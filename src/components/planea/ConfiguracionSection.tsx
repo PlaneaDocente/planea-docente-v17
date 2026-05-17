@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Settings, Trash2, AlertTriangle, RefreshCw, Database,
@@ -9,11 +9,13 @@ import {
   Palette, Moon, Sun, Monitor, Crown, Gift, Share2,
   Image, Type, Phone, Mail, MapPin, GraduationCap,
   CreditCard, CheckCircle2, Zap, Star, ArrowRight,
-  Copy, ExternalLink, Eye, EyeOff, Lock, Unlock
+  Copy, ExternalLink, Eye, EyeOff, Lock, Unlock,
+  Cloud, CloudOff, Building2, MapPinned, DoorOpen, BookOpenCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import {
   store, useStoreItem,
   type Alumno, type Tutor, type Padre, type Justificacion,
@@ -22,9 +24,9 @@ import {
 } from "./planeadocente-store";
 
 /* ═══════════════════════════════════════════════════════════════
-   PLANEADOCENTE – CONFIGURACIÓN COMPLETA
-   Fusiona: Gestión de datos + Escuela + Apariencia + Docente
-   + Suscripción + Afiliados
+   PLANEADOCENTE – CONFIGURACIÓN COMPLETA V2
+   Integración: Supabase + localStorage (modo híbrido)
+   NEM: CCT, Zona Escolar, Sector, Turno, Nivel Educativo
    ═══════════════════════════════════════════════════════════════ */
 
 /* ─── TIPOS ─── */
@@ -53,6 +55,12 @@ interface EscuelaData {
   logo_url: string;
   estado: string;
   pais: string;
+  // Campos NEM
+  cct: string;
+  zona_escolar: string;
+  sector: string;
+  turno: string;
+  nivel_educativo: string;
 }
 
 interface DocenteData {
@@ -104,6 +112,39 @@ const BENEFICIOS_PRO = [
   "Respaldo automático en la nube",
 ];
 
+const NIVELES_NEM = [
+  "Preescolar — 1er Grado",
+  "Preescolar — 2do Grado",
+  "Preescolar — 3er Grado",
+  "Primaria — 1er Grado",
+  "Primaria — 2do Grado",
+  "Primaria — 3er Grado",
+  "Primaria — 4to Grado",
+  "Primaria — 5to Grado",
+  "Primaria — 6to Grado",
+  "Secundaria — 1er Grado",
+  "Secundaria — 2do Grado",
+  "Secundaria — 3er Grado",
+];
+
+const TURNOS_NEM = ["Matutino", "Vespertino", "Nocturno", "Discontinuo", "Continuo"];
+
+/* ─── AUTH HOOK ─── */
+
+function useAuthUser(): string | null {
+  const [userId, setUserId] = useState<string | null>(null);
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) setUserId(user.id);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id ?? null);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+  return userId;
+}
+
 /* ─── HELPERS LOCALSTORAGE CONFIG ─── */
 
 function getConfig<T>(key: keyof typeof defaultConfig, fallback: T): T {
@@ -141,6 +182,11 @@ const defaultConfig = {
     logo_url: "",
     estado: "",
     pais: "México",
+    cct: "",
+    zona_escolar: "",
+    sector: "",
+    turno: "Matutino",
+    nivel_educativo: "Primaria — 1er Grado",
   } as EscuelaData,
   docente: {
     nombre: "Maestro",
@@ -206,7 +252,7 @@ export default function ConfiguracionSection() {
           <h2 className="text-xl font-bold">Configuración del Sistema</h2>
         </div>
         <p className="text-white/70 text-sm">
-          Personaliza PlaneaDocente: datos de tu escuela, apariencia, cuenta y suscripción.
+          Personaliza PlaneaDocente: datos de tu escuela NEM, docente, apariencia, cuenta y suscripción.
         </p>
       </motion.div>
 
@@ -216,7 +262,7 @@ export default function ConfiguracionSection() {
           id="escuela"
           icon={School}
           title="Datos de la Escuela"
-          description="Nombre, dirección, director, ciclo escolar y logo."
+          description="Nombre, CCT, dirección, director, ciclo escolar y logo."
           color="text-blue-600"
           bg="bg-blue-50 dark:bg-blue-950"
           isOpen={activeCard === "escuela"}
@@ -255,7 +301,7 @@ export default function ConfiguracionSection() {
           id="suscripcion"
           icon={Crown}
           title="Suscripción y Afiliados"
-          description="Tu plan, beneficios y código de referido."
+          description="Tu plan real, beneficios y código de referido."
           color="text-amber-600"
           bg="bg-amber-50 dark:bg-amber-950"
           isOpen={activeCard === "suscripcion"}
@@ -268,7 +314,7 @@ export default function ConfiguracionSection() {
           id="datos"
           icon={Database}
           title="Gestión de Datos"
-          description="Respaldo, restauración y limpieza local."
+          description="Respaldo local, sincronización cloud y limpieza."
           color="text-rose-600"
           bg="bg-rose-50 dark:bg-rose-950"
           isOpen={activeCard === "datos"}
@@ -281,7 +327,7 @@ export default function ConfiguracionSection() {
           id="info"
           icon={Info}
           title="Información del Sistema"
-          description="Estadísticas de almacenamiento y versión."
+          description="Estadísticas de almacenamiento local y nube."
           color="text-cyan-600"
           bg="bg-cyan-50 dark:bg-cyan-950"
           isOpen={activeCard === "info"}
@@ -352,23 +398,78 @@ function ConfigCard({
   );
 }
 
-/* ═════════════════════ ESCUELA ═════════════════════ */
+/* ═════════════════════ ESCUELA (NEM) ═════════════════════ */
 
 function EscuelaManager() {
+  const userId = useAuthUser();
   const [escuela, setEscuela] = useConfigItem<EscuelaData>("escuela");
   const [editando, setEditando] = useState(false);
   const [form, setForm] = useState(escuela);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
-  const handleSave = () => {
+  // Cargar desde Supabase al montar
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!userId) { setLoading(false); return; }
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("configuracion")
+        .select("escuela")
+        .eq("user_id", userId)
+        .single();
+      if (!cancelled) {
+        if (data?.escuela) {
+          const remoto = data.escuela as EscuelaData;
+          setEscuela(remoto);
+          setForm(remoto);
+        }
+        setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const handleSave = async () => {
     setSaving(true);
-    setTimeout(() => {
-      setEscuela(form);
-      setSaving(false);
-      setEditando(false);
-      toast.success("Datos de la escuela actualizados.");
-    }, 400);
+    // Guardar local
+    setEscuela(form);
+    // Guardar nube
+    if (userId) {
+      const { error } = await supabase.from("configuracion").upsert(
+        { user_id: userId, escuela: form, actualizado_en: new Date().toISOString() },
+        { onConflict: "user_id" }
+      );
+      if (error) toast.error("Error al sincronizar escuela: " + error.message);
+      else toast.success("Escuela sincronizada con la nube.");
+    }
+    setSaving(false);
+    setEditando(false);
+    toast.success("Datos de la escuela actualizados.");
   };
+
+  const handleSyncNow = async () => {
+    if (!userId) { toast.error("Inicia sesión para sincronizar."); return; }
+    setSyncing(true);
+    const { error } = await supabase.from("configuracion").upsert(
+      { user_id: userId, escuela, actualizado_en: new Date().toISOString() },
+      { onConflict: "user_id" }
+    );
+    setSyncing(false);
+    if (error) toast.error(error.message);
+    else toast.success("Sincronización completada.");
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+        <Loader2 className="w-4 h-4 animate-spin" /> Cargando configuración...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -385,10 +486,16 @@ function EscuelaManager() {
             <div>
               <h4 className="font-semibold text-sm">{escuela.nombre || "Sin nombre"}</h4>
               <p className="text-xs text-muted-foreground">Ciclo: {escuela.ciclo_escolar}</p>
+              {escuela.cct && <p className="text-[10px] text-muted-foreground">CCT: {escuela.cct}</p>}
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+            <InfoRow icon={Building2} label="CCT" value={escuela.cct} />
+            <InfoRow icon={MapPinned} label="Zona Escolar" value={escuela.zona_escolar} />
+            <InfoRow icon={MapPin} label="Sector" value={escuela.sector} />
+            <InfoRow icon={DoorOpen} label="Turno" value={escuela.turno} />
+            <InfoRow icon={BookOpenCheck} label="Nivel NEM" value={escuela.nivel_educativo} />
             <InfoRow icon={MapPin} label="Dirección" value={escuela.direccion} />
             <InfoRow icon={Phone} label="Teléfono" value={escuela.telefono} />
             <InfoRow icon={Mail} label="Email" value={escuela.email} />
@@ -397,9 +504,15 @@ function EscuelaManager() {
             <InfoRow icon={MapPin} label="País" value={escuela.pais} />
           </div>
 
-          <Button size="sm" variant="outline" className="gap-2" onClick={() => { setForm(escuela); setEditando(true); }}>
-            <Settings className="w-3.5 h-3.5" /> Editar información
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="gap-2" onClick={() => { setForm(escuela); setEditando(true); }}>
+              <Settings className="w-3.5 h-3.5" /> Editar información
+            </Button>
+            <Button size="sm" variant="secondary" className="gap-2" onClick={handleSyncNow} disabled={syncing}>
+              {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Cloud className="w-3.5 h-3.5" />}
+              {syncing ? "Sync..." : "Sincronizar"}
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -409,13 +522,41 @@ function EscuelaManager() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">CCT (Clave Centro Trabajo)</label>
+              <input value={form.cct} onChange={(e) => setForm({ ...form, cct: e.target.value })} placeholder="Ej: 14DPR1234A" className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
+            </div>
+            <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Ciclo escolar</label>
               <input value={form.ciclo_escolar} onChange={(e) => setForm({ ...form, ciclo_escolar: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Director</label>
-              <input value={form.director} onChange={(e) => setForm({ ...form, director: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Zona escolar</label>
+              <input value={form.zona_escolar} onChange={(e) => setForm({ ...form, zona_escolar: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
             </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Sector</label>
+              <input value={form.sector} onChange={(e) => setForm({ ...form, sector: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Turno</label>
+              <select value={form.turno} onChange={(e) => setForm({ ...form, turno: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary">
+                {TURNOS_NEM.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Nivel educativo NEM</label>
+              <select value={form.nivel_educativo} onChange={(e) => setForm({ ...form, nivel_educativo: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary">
+                {NIVELES_NEM.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Director</label>
+            <input value={form.director} onChange={(e) => setForm({ ...form, director: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">Dirección completa</label>
@@ -461,20 +602,51 @@ function EscuelaManager() {
 /* ═════════════════════ DOCENTE ═════════════════════ */
 
 function DocenteManager() {
+  const userId = useAuthUser();
   const [docente, setDocente] = useConfigItem<DocenteData>("docente");
   const [editando, setEditando] = useState(false);
   const [form, setForm] = useState(docente);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const handleSave = () => {
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!userId) { setLoading(false); return; }
+      setLoading(true);
+      const { data } = await supabase.from("configuracion").select("docente").eq("user_id", userId).single();
+      if (!cancelled && data?.docente) {
+        const remoto = data.docente as DocenteData;
+        setDocente(remoto);
+        setForm(remoto);
+      }
+      setLoading(false);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const handleSave = async () => {
     setSaving(true);
-    setTimeout(() => {
-      setDocente(form);
-      setSaving(false);
-      setEditando(false);
-      toast.success("Perfil del docente actualizado.");
-    }, 400);
+    setDocente(form);
+    if (userId) {
+      await supabase.from("configuracion").upsert(
+        { user_id: userId, docente: form, actualizado_en: new Date().toISOString() },
+        { onConflict: "user_id" }
+      );
+    }
+    setSaving(false);
+    setEditando(false);
+    toast.success("Perfil del docente actualizado.");
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+        <Loader2 className="w-4 h-4 animate-spin" /> Cargando perfil...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -551,43 +723,40 @@ function DocenteManager() {
 /* ═════════════════════ APARIENCIA ═════════════════════ */
 
 function AparienciaManager() {
+  const userId = useAuthUser();
   const [apariencia, setApariencia] = useConfigItem<AparienciaData>("apariencia");
   const [aplicando, setAplicando] = useState(false);
 
-  const aplicarTema = () => {
+  const aplicarTema = async () => {
     setAplicando(true);
-    setTimeout(() => {
-      // Aplicar tema al documento
-      const root = document.documentElement;
-      if (apariencia.tema === "dark") {
+    const root = document.documentElement;
+    if (apariencia.tema === "dark") {
+      root.classList.add("dark");
+      root.classList.remove("light");
+    } else if (apariencia.tema === "light") {
+      root.classList.remove("dark");
+      root.classList.add("light");
+    } else {
+      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
         root.classList.add("dark");
-        root.classList.remove("light");
-      } else if (apariencia.tema === "light") {
-        root.classList.remove("dark");
-        root.classList.add("light");
       } else {
-        // system
-        if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-          root.classList.add("dark");
-        } else {
-          root.classList.remove("dark");
-        }
+        root.classList.remove("dark");
       }
+    }
+    root.style.setProperty("--primary-color", apariencia.color_primario);
+    const radios = { small: "0.5rem", medium: "0.75rem", large: "1rem" };
+    root.style.setProperty("--radius", radios[apariencia.radio_borde]);
+    const escalas = { compact: "14px", normal: "16px", large: "18px" };
+    root.style.setProperty("--base-font-size", escalas[apariencia.fuente_escala]);
 
-      // Aplicar color primario como variable CSS (si tu app lo soporta)
-      root.style.setProperty("--primary-color", apariencia.color_primario);
-
-      // Radio de borde
-      const radios = { small: "0.5rem", medium: "0.75rem", large: "1rem" };
-      root.style.setProperty("--radius", radios[apariencia.radio_borde]);
-
-      // Escala de fuente
-      const escalas = { compact: "14px", normal: "16px", large: "18px" };
-      root.style.setProperty("--base-font-size", escalas[apariencia.fuente_escala]);
-
-      setAplicando(false);
-      toast.success("Apariencia aplicada. Recarga si no ves todos los cambios.");
-    }, 400);
+    if (userId) {
+      await supabase.from("configuracion").upsert(
+        { user_id: userId, apariencia, actualizado_en: new Date().toISOString() },
+        { onConflict: "user_id" }
+      );
+    }
+    setAplicando(false);
+    toast.success("Apariencia aplicada y sincronizada. Recarga si no ves todos los cambios.");
   };
 
   return (
@@ -727,22 +896,48 @@ function AparienciaManager() {
   );
 }
 
-/* ═════════════════════ SUSCRIPCIÓN Y AFILIADOS ═════════════════════ */
+/* ═════════════════════ SUSCRIPCIÓN REAL (SUPABASE) ═════════════════════ */
 
 function SuscripcionManager() {
-  const [suscripcion, setSuscripcion] = useConfigItem<SuscripcionData>("suscripcion");
+  const userId = useAuthUser();
+  const [suscripcionLocal, setSuscripcionLocal] = useConfigItem<SuscripcionData>("suscripcion");
+  const [suscripcionReal, setSuscripcionReal] = useState<any>(null);
+  const [planReal, setPlanReal] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [copiado, setCopiado] = useState(false);
 
-  // Generar código de referido si no existe
   useEffect(() => {
-    if (!suscripcion.codigo_referido) {
-      const codigo = "PD" + Math.random().toString(36).substring(2, 8).toUpperCase();
-      setSuscripcion({ ...suscripcion, codigo_referido: codigo });
+    let cancelled = false;
+    async function load() {
+      if (!userId) { setLoading(false); return; }
+      setLoading(true);
+      const { data: sub } = await supabase
+        .from("subscriptions")
+        .select("*, plan:subscription_plans(*)")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled) {
+        setSuscripcionReal(sub);
+        if (sub?.plan) setPlanReal(sub.plan);
+        setLoading(false);
+      }
     }
-  }, []);
+    load();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Generar código de referido si no existe (local)
+  useEffect(() => {
+    if (!suscripcionLocal.codigo_referido) {
+      const codigo = "PD" + Math.random().toString(36).substring(2, 8).toUpperCase();
+      setSuscripcionLocal((prev) => ({ ...prev, codigo_referido: codigo }));
+    }
+  }, [suscripcionLocal.codigo_referido]);
 
   const copiarCodigo = () => {
-    navigator.clipboard.writeText(suscripcion.codigo_referido).then(() => {
+    navigator.clipboard.writeText(suscripcionLocal.codigo_referido).then(() => {
       setCopiado(true);
       toast.success("Código copiado al portapapeles");
       setTimeout(() => setCopiado(false), 2000);
@@ -755,12 +950,26 @@ function SuscripcionManager() {
     escuela: { label: "Escuela", precio: "$299/mes", color: "text-purple-600", badge: "bg-purple-100 text-purple-700" },
   };
 
-  const planActual = planes[suscripcion.plan];
+  const planId = suscripcionReal?.status === "trialing" || suscripcionReal?.status === "active"
+    ? (planReal?.id || "pro")
+    : suscripcionLocal.plan;
+  const planActual = planes[planId] || planes.free;
+  const expira = suscripcionReal?.current_period_end
+    ? new Date(suscripcionReal.current_period_end).toLocaleDateString("es-MX")
+    : (suscripcionLocal.expira ? new Date(suscripcionLocal.expira).toLocaleDateString("es-MX") : "");
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+        <Loader2 className="w-4 h-4 animate-spin" /> Consultando suscripción...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
       {/* Plan actual */}
-      <div className={`rounded-xl p-4 border ${suscripcion.plan === "free" ? "border-gray-200 bg-gray-50" : suscripcion.plan === "pro" ? "border-amber-200 bg-amber-50" : "border-purple-200 bg-purple-50"}`}>
+      <div className={`rounded-xl p-4 border ${planId === "free" ? "border-gray-200 bg-gray-50" : planId === "pro" ? "border-amber-200 bg-amber-50" : "border-purple-200 bg-purple-50"}`}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Crown className={`w-5 h-5 ${planActual.color}`} />
@@ -769,25 +978,28 @@ function SuscripcionManager() {
           <Badge className={planActual.badge}>{planActual.label}</Badge>
         </div>
         <p className="text-2xl font-bold">{planActual.precio}</p>
-        {suscripcion.expira && (
+        {expira && (
           <p className="text-xs text-muted-foreground mt-1">
-            Expira: {new Date(suscripcion.expira).toLocaleDateString("es-MX")}
+            {suscripcionReal?.status === "trialing" ? "Trial hasta: " : "Próxima renovación: "} {expira}
           </p>
+        )}
+        {suscripcionReal?.stripe_subscription_id && (
+          <p className="text-[10px] text-muted-foreground mt-1 font-mono">ID: {suscripcionReal.stripe_subscription_id.slice(0, 12)}...</p>
         )}
       </div>
 
       {/* Cambiar plan */}
       <div>
-        <label className="text-xs font-medium text-muted-foreground mb-2 block">Cambiar plan</label>
+        <label className="text-xs font-medium text-muted-foreground mb-2 block">Cambiar plan (modo local)</label>
         <div className="space-y-2">
           {Object.entries(planes).map(([key, p]) => {
-            const active = suscripcion.plan === key;
+            const active = suscripcionLocal.plan === key;
             return (
               <button
                 key={key}
                 onClick={() => {
-                  setSuscripcion({ ...suscripcion, plan: key as SuscripcionData["plan"] });
-                  toast.success(`Plan cambiado a ${p.label}`);
+                  setSuscripcionLocal((prev) => ({ ...prev, plan: key as SuscripcionData["plan"] }));
+                  toast.success(`Plan local cambiado a ${p.label}`);
                 }}
                 className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${
                   active ? "border-primary bg-primary/5" : "border-border bg-muted/30 hover:bg-muted/50"
@@ -810,7 +1022,7 @@ function SuscripcionManager() {
       </div>
 
       {/* Beneficios PRO */}
-      {suscripcion.plan !== "free" && (
+      {suscripcionLocal.plan !== "free" && (
         <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4">
           <h4 className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 mb-2 flex items-center gap-2">
             <Zap className="w-4 h-4" /> Beneficios activos
@@ -837,7 +1049,7 @@ function SuscripcionManager() {
 
         <div className="flex items-center gap-2">
           <div className="flex-1 bg-white dark:bg-slate-900 rounded-lg px-3 py-2 border border-blue-200 dark:border-blue-800 flex items-center justify-between">
-            <code className="text-sm font-mono text-blue-700 dark:text-blue-300">{suscripcion.codigo_referido}</code>
+            <code className="text-sm font-mono text-blue-700 dark:text-blue-300">{suscripcionLocal.codigo_referido}</code>
             <button
               onClick={copiarCodigo}
               className="p-1.5 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
@@ -852,18 +1064,20 @@ function SuscripcionManager() {
         </div>
 
         <p className="text-[10px] text-blue-500 dark:text-blue-400 mt-2">
-          Usos exitosos: <span className="font-bold">{suscripcion.usos_referido}</span> · Recompensa acumulada: {suscripcion.usos_referido * 30} días
+          Usos exitosos: <span className="font-bold">{suscripcionLocal.usos_referido}</span> · Recompensa acumulada: {suscripcionLocal.usos_referido * 30} días
         </p>
       </div>
     </div>
   );
 }
 
-/* ═════════════════════ GESTIÓN DE DATOS (ORIGINAL) ═════════════════════ */
+/* ═════════════════════ GESTIÓN DE DATOS (HÍBRIDA) ═════════════════════ */
 
 function DatosManager() {
+  const userId = useAuthUser();
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [limpiando, setLimpiando] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const limpiarTodo = () => {
     setLimpiando(true);
@@ -883,6 +1097,34 @@ function DatosManager() {
   const limpiarTabla = (tabla: string, setter: () => void) => {
     setter();
     toast.success(`Datos de ${tabla} eliminados.`);
+  };
+
+  const sincronizarNube = async () => {
+    if (!userId) { toast.error("Inicia sesión para sincronizar."); return; }
+    setSyncing(true);
+    try {
+      const data: BackupData = {
+        version: "3.2.0",
+        fecha: new Date().toISOString(),
+        alumnos: store.alumnos.get(),
+        tutores: store.tutores.get(),
+        padres: store.padres.get(),
+        justificaciones: store.justificaciones.get(),
+        observaciones: store.observaciones.get(),
+        asistencia: store.asistencia.get(),
+        avisos: store.avisos.get(),
+        tareas: store.tareas.get(),
+        mensajes: store.mensajes.get(),
+      };
+      const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+      const fileName = `backup_${userId}_${Date.now()}.json`;
+      const { error } = await supabase.storage.from("backups").upload(fileName, blob, { upsert: true });
+      if (error) throw error;
+      toast.success("Respaldo subido a la nube correctamente.");
+    } catch (e: any) {
+      toast.error("Error al subir: " + (e.message || "Desconocido"));
+    }
+    setSyncing(false);
   };
 
   return (
@@ -927,6 +1169,17 @@ function DatosManager() {
           <LimpiarBoton label="Tareas" onClick={() => limpiarTabla("Tareas", () => store.tareas.set([]))} />
           <LimpiarBoton label="Mensajes" onClick={() => limpiarTabla("Mensajes", () => store.mensajes.set([]))} />
         </div>
+      </div>
+
+      <div className="pt-2 border-t border-border">
+        <h4 className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Sincronización cloud</h4>
+        <Button size="sm" variant="secondary" className="gap-2 w-full" onClick={sincronizarNube} disabled={syncing}>
+          {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
+          {syncing ? "Subiendo respaldo..." : "Subir respaldo a la nube"}
+        </Button>
+        <p className="text-[10px] text-muted-foreground mt-1">
+          Requiere sesión iniciada. El archivo se guarda en Supabase Storage bucket "backups".
+        </p>
       </div>
 
       <RespaldoUI />
@@ -1011,7 +1264,7 @@ function RespaldoUI() {
 
   return (
     <div className="space-y-3 pt-2 border-t border-border">
-      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Respaldo y restauración</h4>
+      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Respaldo y restauración local</h4>
       <div className="grid grid-cols-2 gap-3">
         <Button size="sm" variant="outline" className="gap-1 text-xs w-full" onClick={exportarRespaldo} disabled={exportando}>
           {exportando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
@@ -1031,9 +1284,10 @@ function RespaldoUI() {
   );
 }
 
-/* ═════════════════════ INFORMACIÓN DEL SISTEMA ═════════════════════ */
+/* ═════════════════════ INFORMACIÓN DEL SISTEMA (REAL) ═════════════════════ */
 
 function InfoManager() {
+  const userId = useAuthUser();
   const [alumnos] = useStoreItem(store.alumnos);
   const [tutores] = useStoreItem(store.tutores);
   const [padres] = useStoreItem(store.padres);
@@ -1043,8 +1297,10 @@ function InfoManager() {
   const [avisos] = useStoreItem(store.avisos);
   const [tareas] = useStoreItem(store.tareas);
   const [mensajes] = useStoreItem(store.mensajes);
+  const [dbCounts, setDbCounts] = useState<Record<string, number>>({});
+  const [loadingCounts, setLoadingCounts] = useState(false);
 
-  const calcularTamaño = () => {
+  const calcularTamaño = useMemo(() => {
     let total = 0;
     Object.keys(localStorage).forEach((k) => {
       if (k.startsWith("pd_") || k.startsWith("planeadocente_") || k === STORAGE_CONFIG) {
@@ -1052,18 +1308,39 @@ function InfoManager() {
       }
     });
     return (total / 1024).toFixed(2);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    setLoadingCounts(true);
+    Promise.all([
+      supabase.from("alumnos").select("*", { count: "exact", head: true }).eq("user_id", userId),
+      supabase.from("padres").select("*", { count: "exact", head: true }).eq("user_id", userId),
+      supabase.from("avisos").select("*", { count: "exact", head: true }).eq("user_id", userId),
+      supabase.from("tareas_digitales").select("*", { count: "exact", head: true }).eq("user_id", userId),
+      supabase.from("mensajes").select("*", { count: "exact", head: true }).eq("user_id", userId),
+    ]).then(([a, p, av, t, m]) => {
+      setDbCounts({
+        alumnos: a.count || 0,
+        padres: p.count || 0,
+        avisos: av.count || 0,
+        tareas: t.count || 0,
+        mensajes: m.count || 0,
+      });
+      setLoadingCounts(false);
+    });
+  }, [userId]);
 
   const stats = [
-    { label: "Alumnos", value: alumnos.length, icon: Database, color: "text-blue-600" },
+    { label: "Alumnos", value: alumnos.length, db: dbCounts.alumnos, icon: Database, color: "text-blue-600" },
     { label: "Tutores", value: tutores.length, icon: Database, color: "text-cyan-600" },
-    { label: "Padres", value: padres.length, icon: Database, color: "text-emerald-600" },
+    { label: "Padres", value: padres.length, db: dbCounts.padres, icon: Database, color: "text-emerald-600" },
     { label: "Justificaciones", value: justificaciones.length, icon: FileWarning, color: "text-amber-600" },
     { label: "Observaciones", value: observaciones.length, icon: FileWarning, color: "text-purple-600" },
     { label: "Registros asist.", value: asistencia.length, icon: Clock, color: "text-indigo-600" },
-    { label: "Avisos", value: avisos.length, icon: Database, color: "text-rose-600" },
-    { label: "Tareas", value: tareas.length, icon: Database, color: "text-orange-600" },
-    { label: "Mensajes", value: mensajes.length, icon: Database, color: "text-teal-600" },
+    { label: "Avisos", value: avisos.length, db: dbCounts.avisos, icon: Database, color: "text-rose-600" },
+    { label: "Tareas", value: tareas.length, db: dbCounts.tareas, icon: Database, color: "text-orange-600" },
+    { label: "Mensajes", value: mensajes.length, db: dbCounts.mensajes, icon: Database, color: "text-teal-600" },
   ];
 
   return (
@@ -1075,6 +1352,9 @@ function InfoManager() {
             <div key={s.label} className="bg-muted/50 rounded-lg p-3 border border-border text-center">
               <Icon className={`w-4 h-4 ${s.color} mx-auto mb-1`} />
               <p className="text-lg font-bold">{s.value}</p>
+              {s.db !== undefined && (
+                <p className="text-[10px] text-muted-foreground">Nube: {s.db}</p>
+              )}
               <p className="text-[10px] text-muted-foreground">{s.label}</p>
             </div>
           );
@@ -1088,17 +1368,17 @@ function InfoManager() {
         </div>
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Espacio utilizado en localStorage</span>
-          <Badge variant="secondary" className="text-xs">{calcularTamaño()} KB</Badge>
+          <Badge variant="secondary" className="text-xs">{calcularTamaño} KB</Badge>
         </div>
         <div className="mt-2 w-full bg-muted rounded-full h-2">
-          <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(parseFloat(calcularTamaño()) / 50 * 100, 100)}%` }} />
+          <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(parseFloat(calcularTamaño) / 50 * 100, 100)}%` }} />
         </div>
         <p className="text-[10px] text-muted-foreground mt-1">Límite recomendado: ~5 MB por dominio</p>
       </div>
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Shield className="w-3 h-3" />
-        <span>Versión del store: v2.0 · Datos persistentes en este navegador</span>
+        <span>Versión del store: v2.0 · Datos persistentes en este navegador y Supabase</span>
       </div>
     </div>
   );

@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Bell, MessageSquare, Plus, CheckCircle2, Loader2, Users,
   Megaphone, BookOpen, Trash2, X, Search, Phone, Mail,
   Smartphone, UserPlus, Hash, Eye,
-  RefreshCw, Info
+  RefreshCw, Info, CloudOff, Cloud
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import {
   store, useStoreItem, GRUPOS, formatDate, timeAgo,
-  sendWhatsApp, sendEmail, getPadresPorGrupo, syncPadreToTutores,
   type TabId, type AvisoTipo, type TareaEstado, type Aviso,
   type TareaDigital, type Mensaje, type Padre, type Alumno,
 } from "./planeadocente-store";
@@ -44,6 +44,37 @@ function getEstadoBadge(estado: TareaEstado) {
     vencida: { label: "Vencida", className: "bg-red-100 text-red-700 border-red-200" },
   };
   return map[estado];
+}
+
+/* ─── AUTH HOOK ─── */
+
+function useAuthUser(): string | null {
+  const [userId, setUserId] = useState<string | null>(null);
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) setUserId(user.id);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id ?? null);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+  return userId;
+}
+
+/* ─── HELPERS COMUNICACIÓN ─── */
+
+function openWhatsApp(phone: string, message: string) {
+  const clean = phone.replace(/\D/g, "");
+  if (!clean) { toast.error("Teléfono inválido"); return; }
+  const url = `https://wa.me/${clean}?text=${encodeURIComponent(message)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function openEmail(email: string, subject: string, body: string) {
+  if (!email || !email.includes("@")) { toast.error("Email inválido"); return; }
+  const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.open(url, "_blank");
 }
 
 /* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
@@ -113,12 +144,37 @@ export default function PadresSection() {
   );
 }
 
-/* ═════════════════════ AVISOS ═════════════════════ */
+/* ═════════════════════ AVISOS (SUPABASE) ═════════════════════ */
 
 function AvisosView() {
+  const userId = useAuthUser();
   const [avisos, setAvisos] = useStoreItem(store.avisos);
   const [search, setSearch] = useState("");
   const [grupoFilter, setGrupoFilter] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  // Cargar desde Supabase
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!userId) { setLoading(false); return; }
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("avisos")
+        .select("*")
+        .eq("user_id", userId)
+        .order("creado_en", { ascending: false });
+      if (!cancelled) {
+        if (data) {
+          setAvisos(data as Aviso[]);
+        }
+        if (error) toast.error("Error cargando avisos: " + error.message);
+        setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [userId]);
 
   const filtered = avisos.filter((a) => {
     const matchSearch = a.titulo.toLowerCase().includes(search.toLowerCase()) || a.mensaje.toLowerCase().includes(search.toLowerCase());
@@ -126,30 +182,50 @@ function AvisosView() {
     return matchSearch && matchGrupo;
   });
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar este aviso?")) return;
+    if (userId) {
+      const { error } = await supabase.from("avisos").delete().eq("id", id).eq("user_id", userId);
+      if (error) { toast.error(error.message); return; }
+    }
     setAvisos((prev) => prev.filter((a) => a.id !== id));
     toast.success("Aviso eliminado.");
   };
 
-  const handleSendWhatsApp = (aviso: Aviso) => {
-    const padres = getPadresPorGrupo(aviso.grupo);
-    if (padres.length === 0) { toast.error("No hay padres registrados en este grupo."); return; }
+  const handleSendWhatsApp = async (aviso: Aviso) => {
+    if (!userId) { toast.error("Inicia sesión."); return; }
+    const { data: padres } = await supabase.from("padres").select("*").eq("user_id", userId).eq("grupo", aviso.grupo);
+    if (!padres?.length) { toast.error("No hay padres registrados en este grupo."); return; }
     const msg = `📢 *${aviso.titulo}*\n\n${aviso.mensaje}\n\n_Fecha: ${formatDate(aviso.fecha)}_\n_Enviado desde PlaneaDocente_`;
-    padres.forEach((p) => sendWhatsApp(p.telefono, msg));
+    padres.forEach((p) => openWhatsApp(p.telefono, msg));
+    if (userId) {
+      await supabase.from("avisos").update({ enviado_whatsapp: true }).eq("id", aviso.id).eq("user_id", userId);
+    }
     setAvisos((prev) => prev.map((a) => a.id === aviso.id ? { ...a, enviado_whatsapp: true } : a));
     toast.success(`Mensaje enviado a ${padres.length} padres por WhatsApp.`);
   };
 
-  const handleSendEmail = (aviso: Aviso) => {
-    const padres = getPadresPorGrupo(aviso.grupo);
-    if (padres.length === 0) { toast.error("No hay padres registrados en este grupo."); return; }
+  const handleSendEmail = async (aviso: Aviso) => {
+    if (!userId) { toast.error("Inicia sesión."); return; }
+    const { data: padres } = await supabase.from("padres").select("*").eq("user_id", userId).eq("grupo", aviso.grupo);
+    if (!padres?.length) { toast.error("No hay padres registrados en este grupo."); return; }
     const subject = `📢 ${aviso.titulo}`;
     const body = `${aviso.mensaje}\n\nFecha: ${formatDate(aviso.fecha)}\nEnviado desde PlaneaDocente`;
-    padres.forEach((p) => sendEmail(p.email, subject, body));
+    padres.forEach((p) => openEmail(p.email, subject, body));
+    if (userId) {
+      await supabase.from("avisos").update({ enviado_email: true }).eq("id", aviso.id).eq("user_id", userId);
+    }
     setAvisos((prev) => prev.map((a) => a.id === aviso.id ? { ...a, enviado_email: true } : a));
     toast.success(`Correo enviado a ${padres.length} padres.`);
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
+        <Loader2 className="w-4 h-4 animate-spin" /> Cargando avisos desde la nube...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -223,27 +299,64 @@ function AvisosView() {
   );
 }
 
-/* ═════════════════════ TAREAS DIGITALES ═════════════════════ */
+/* ═════════════════════ TAREAS DIGITALES (SUPABASE) ═════════════════════ */
 
 function TareasDigitalesView() {
+  const userId = useAuthUser();
   const [tareas, setTareas] = useStoreItem(store.tareas);
   const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!userId) { setLoading(false); return; }
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("tareas_digitales")
+        .select("*")
+        .eq("user_id", userId)
+        .order("creado_en", { ascending: false });
+      if (!cancelled) {
+        if (data) setTareas(data as TareaDigital[]);
+        if (error) toast.error("Error cargando tareas: " + error.message);
+        setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [userId]);
 
   const filtered = tareas.filter((t) => t.titulo.toLowerCase().includes(search.toLowerCase()) || t.materia.toLowerCase().includes(search.toLowerCase()));
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar esta tarea?")) return;
+    if (userId) {
+      const { error } = await supabase.from("tareas_digitales").delete().eq("id", id).eq("user_id", userId);
+      if (error) { toast.error(error.message); return; }
+    }
     setTareas((prev) => prev.filter((t) => t.id !== id));
     toast.success("Tarea eliminada.");
   };
 
-  const handleSendWhatsApp = (tarea: TareaDigital) => {
-    const padres = getPadresPorGrupo(tarea.grupo);
-    if (padres.length === 0) { toast.error("No hay padres registrados en este grupo."); return; }
+  const handleSendWhatsApp = async (tarea: TareaDigital) => {
+    if (!userId) { toast.error("Inicia sesión."); return; }
+    const { data: padres } = await supabase.from("padres").select("*").eq("user_id", userId).eq("grupo", tarea.grupo);
+    if (!padres?.length) { toast.error("No hay padres registrados en este grupo."); return; }
     const msg = `📚 *Nueva Tarea: ${tarea.titulo}*\n\nMateria: ${tarea.materia}\n${tarea.descripcion}\n\n📅 Entrega: ${formatDate(tarea.fecha_entrega)}\n_Enviado desde PlaneaDocente_`;
-    padres.forEach((p) => sendWhatsApp(p.telefono, msg));
+    padres.forEach((p) => openWhatsApp(p.telefono, msg));
+    await supabase.from("tareas_digitales").update({ enviadas: padres.length, estado: "enviada" }).eq("id", tarea.id).eq("user_id", userId);
+    setTareas((prev) => prev.map((t) => t.id === tarea.id ? { ...t, enviadas: padres.length, estado: "enviada" } : t));
     toast.success(`Tarea enviada a ${padres.length} padres por WhatsApp.`);
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
+        <Loader2 className="w-4 h-4 animate-spin" /> Cargando tareas...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -302,14 +415,61 @@ function TareasDigitalesView() {
   );
 }
 
-/* ═════════════════════ MENSAJES ═════════════════════ */
+/* ═════════════════════ MENSAJES (SUPABASE + REALTIME) ═════════════════════ */
 
 function MensajesView() {
+  const userId = useAuthUser();
   const [mensajes, setMensajes] = useStoreItem(store.mensajes);
   const [grupoSeleccionado, setGrupoSeleccionado] = useState("3°A");
   const [newMsg, setNewMsg] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Cargar mensajes
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!userId) { setLoading(false); return; }
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("mensajes")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("grupo_id", grupoSeleccionado)
+        .order("creado_en", { ascending: true });
+      if (!cancelled) {
+        if (data) setMensajes(data as Mensaje[]);
+        if (error) toast.error("Error cargando mensajes: " + error.message);
+        setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [userId, grupoSeleccionado]);
+
+  // Realtime subscription
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel(`mensajes-${grupoSeleccionado}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "mensajes",
+        filter: `grupo_id=eq.${grupoSeleccionado}`,
+      }, (payload) => {
+        const nuevo = payload.new as Mensaje;
+        if ((nuevo as any).user_id === userId) {
+          setMensajes((prev) => [...prev, nuevo]);
+          if (nuevo.remitente === "padre") {
+            toast.info(`Nuevo mensaje de ${nuevo.nombre_remitente}`, { duration: 4000 });
+          }
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [grupoSeleccionado, userId]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -318,11 +478,10 @@ function MensajesView() {
   const filtered = mensajes.filter((m) => m.grupo_id === grupoSeleccionado);
   const noLeidos = filtered.filter((m) => !m.leido && m.remitente === "padre").length;
 
-  const enviarMensaje = () => {
-    if (!newMsg.trim()) return;
+  const enviarMensaje = async () => {
+    if (!newMsg.trim() || !userId) return;
     setEnviando(true);
-    const msg: Mensaje = {
-      id: `m-${Date.now()}`,
+    const msg: Omit<Mensaje, "id"> = {
       texto: newMsg.trim(),
       remitente: "maestro",
       nombre_remitente: "Maestro",
@@ -330,35 +489,31 @@ function MensajesView() {
       leido: true,
       creado_en: new Date().toISOString(),
     };
-    setTimeout(() => {
-      setMensajes((prev) => [...prev, msg]);
-      setNewMsg("");
+    const { data, error } = await supabase.from("mensajes").insert({ ...msg, user_id: userId }).select().single();
+    if (error) {
+      toast.error("Error enviando: " + error.message);
       setEnviando(false);
-      toast.success("Mensaje enviado.");
-    }, 400);
+      return;
+    }
+    if (data) setMensajes((prev) => [...prev, data as Mensaje]);
+    setNewMsg("");
+    setEnviando(false);
+    toast.success("Mensaje enviado.");
   };
 
-  const marcarLeido = (id: string) => {
+  const marcarLeido = async (id: string) => {
+    if (!userId) return;
+    await supabase.from("mensajes").update({ leido: true }).eq("id", id).eq("user_id", userId);
     setMensajes((prev) => prev.map((m) => m.id === id ? { ...m, leido: true } : m));
   };
 
-  const simularRespuestaPadre = () => {
-    const nombres = ["Juan Pérez", "María López", "Carlos Ruiz", "Ana García", "Luis Torres"];
-    const textos = ["Gracias por la información", "Entendido, maestro", "¿A qué hora es la reunión?", "Mi hijo entregará la tarea", "Buenas tardes"];
-    const nombre = nombres[Math.floor(Math.random() * nombres.length)];
-    const texto = textos[Math.floor(Math.random() * textos.length)];
-    const msg: Mensaje = {
-      id: `m-${Date.now()}`,
-      texto,
-      remitente: "padre",
-      nombre_remitente: nombre,
-      grupo_id: grupoSeleccionado,
-      leido: false,
-      creado_en: new Date().toISOString(),
-    };
-    setMensajes((prev) => [...prev, msg]);
-    toast.info(`Nuevo mensaje de ${nombre}`, { duration: 4000 });
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
+        <Loader2 className="w-4 h-4 animate-spin" /> Cargando mensajes...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -370,9 +525,10 @@ function MensajesView() {
           </select>
           {noLeidos > 0 && <Badge variant="destructive" className="text-xs">{noLeidos} nuevo{noLeidos > 1 ? "s" : ""}</Badge>}
         </div>
-        <Button variant="outline" size="sm" className="gap-2 text-xs" onClick={simularRespuestaPadre}>
-          <RefreshCw className="w-3 h-3" /> Simular mensaje de padre
-        </Button>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Cloud className="w-3 h-3" />
+          <span>Realtime activo</span>
+        </div>
       </div>
 
       <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
@@ -398,7 +554,7 @@ function MensajesView() {
               <motion.div key={m.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className={`p-3 rounded-xl mb-2 ${isMaestro ? "bg-primary/5 ml-8" : "bg-muted/50 mr-8"}`} onClick={() => !m.leido && m.remitente === "padre" && marcarLeido(m.id)}>
                 <div className="flex items-start gap-2">
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isMaestro ? "bg-primary text-primary-foreground" : "bg-cyan-100 text-cyan-700"}`}>
-                    {isMaestro ? "M" : m.nombre_remitente[0]}
+                    {isMaestro ? "M" : m.nombre_remitente?.[0] || "P"}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -428,12 +584,34 @@ function MensajesView() {
   );
 }
 
-/* ═════════════════════ PADRES DE FAMILIA ═════════════════════ */
+/* ═════════════════════ PADRES DE FAMILIA (SUPABASE) ═════════════════════ */
 
 function PadresView() {
+  const userId = useAuthUser();
   const [padres, setPadres] = useStoreItem(store.padres);
   const [search, setSearch] = useState("");
   const [grupoFilter, setGrupoFilter] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!userId) { setLoading(false); return; }
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("padres")
+        .select("*")
+        .eq("user_id", userId)
+        .order("creado_en", { ascending: false });
+      if (!cancelled) {
+        if (data) setPadres(data as Padre[]);
+        if (error) toast.error("Error cargando padres: " + error.message);
+        setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [userId]);
 
   const filtered = padres.filter((p) => {
     const matchSearch = p.nombre.toLowerCase().includes(search.toLowerCase()) || p.nombre_hijo.toLowerCase().includes(search.toLowerCase()) || p.email.toLowerCase().includes(search.toLowerCase());
@@ -441,22 +619,38 @@ function PadresView() {
     return matchSearch && matchGrupo;
   });
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar este padre de familia?")) return;
+    if (userId) {
+      const { error } = await supabase.from("padres").delete().eq("id", id).eq("user_id", userId);
+      if (error) { toast.error(error.message); return; }
+    }
     setPadres((prev) => prev.filter((p) => p.id !== id));
     const tutores = store.tutores.get().filter((t) => t.id !== id);
     store.tutores.set(tutores);
     toast.success("Padre eliminado.");
   };
 
-  const handleToggleActivo = (id: string) => {
-    setPadres((prev) => prev.map((p) => p.id === id ? { ...p, activo: !p.activo } : p));
-    toast.success("Estado actualizado.");
+  const handleToggleActivo = async (id: string, actual: boolean) => {
+    const nuevo = !actual;
+    if (userId) {
+      await supabase.from("padres").update({ activo: nuevo }).eq("id", id).eq("user_id", userId);
+    }
+    setPadres((prev) => prev.map((p) => p.id === id ? { ...p, activo: nuevo } : p));
+    toast.success(nuevo ? "Padre activado" : "Padre desactivado");
   };
 
   const handleCopyPhone = (phone: string) => {
     navigator.clipboard.writeText(phone).then(() => toast.success("Teléfono copiado."));
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
+        <Loader2 className="w-4 h-4 animate-spin" /> Cargando padres...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -502,12 +696,16 @@ function PadresView() {
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3 flex-1 min-w-0">
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-100 to-blue-100 dark:from-cyan-900 dark:to-blue-900 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300">{p.nombre[0]}</span>
+                  <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300">{p.nombre?.[0] || "?"}</span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="text-sm font-semibold">{p.nombre}</h4>
-                    <Badge variant={p.activo ? "default" : "secondary"} className={`text-xs cursor-pointer ${p.activo ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`} onClick={() => handleToggleActivo(p.id)}>
+                    <Badge
+                      variant={p.activo ? "default" : "secondary"}
+                      className={`text-xs cursor-pointer ${p.activo ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                      onClick={() => handleToggleActivo(p.id, p.activo)}
+                    >
                       {p.activo ? "Activo" : "Inactivo"}
                     </Badge>
                     <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{p.grupo}</span>
@@ -529,12 +727,12 @@ function PadresView() {
               </div>
               <div className="flex gap-1 shrink-0">
                 {p.telefono && (
-                  <button onClick={() => sendWhatsApp(p.telefono, `Hola ${p.nombre}, soy el maestro de ${p.nombre_hijo}.`)} className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-green-600 hover:bg-green-50 transition-colors" title="Enviar WhatsApp">
+                  <button onClick={() => openWhatsApp(p.telefono, `Hola ${p.nombre}, soy el maestro de ${p.nombre_hijo}.`)} className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-green-600 hover:bg-green-50 transition-colors" title="Enviar WhatsApp">
                     <Smartphone className="w-4 h-4" />
                   </button>
                 )}
                 {p.email && (
-                  <button onClick={() => sendEmail(p.email, `Mensaje sobre ${p.nombre_hijo}`, `Estimado/a ${p.nombre},\n\n`)} className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Enviar Email">
+                  <button onClick={() => openEmail(p.email, `Mensaje sobre ${p.nombre_hijo}`, `Estimado/a ${p.nombre},\n\n`)} className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-blue-600 hover:bg-blue-50 transition-colors" title="Enviar Email">
                     <Mail className="w-4 h-4" />
                   </button>
                 )}
@@ -586,6 +784,7 @@ function ModalWrapper({ title, icon: Icon, children, onClose }: { title: string;
 /* ─── Nuevo Aviso ─── */
 
 function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
+  const userId = useAuthUser();
   const [titulo, setTitulo] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [tipo, setTipo] = useState<AvisoTipo>("aviso");
@@ -593,11 +792,11 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [, setAvisos] = useStoreItem(store.avisos);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!titulo.trim() || !mensaje.trim()) { toast.error("Completa todos los campos obligatorios."); return; }
+    if (!userId) { toast.error("Inicia sesión para guardar."); return; }
     setSaving(true);
-    const nuevo: Aviso = {
-      id: `a-${Date.now()}`,
+    const nuevo: Omit<Aviso, "id"> = {
       titulo: titulo.trim(),
       mensaje: mensaje.trim(),
       tipo,
@@ -609,12 +808,16 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
       enviado_email: false,
       creado_en: new Date().toISOString(),
     };
-    setAvisos((prev) => [nuevo, ...prev]);
-    setTimeout(() => {
+    const { data, error } = await supabase.from("avisos").insert({ ...nuevo, user_id: userId }).select().single();
+    if (error) {
+      toast.error("Error guardando: " + error.message);
       setSaving(false);
-      toast.success("Aviso creado correctamente.");
-      onClose();
-    }, 500);
+      return;
+    }
+    if (data) setAvisos((prev) => [data as Aviso, ...prev]);
+    setSaving(false);
+    toast.success("Aviso creado correctamente.");
+    onClose();
   };
 
   return (
@@ -660,6 +863,7 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
 /* ─── Nueva Tarea ─── */
 
 function NuevaTareaModal({ onClose }: { onClose: () => void }) {
+  const userId = useAuthUser();
   const [titulo, setTitulo] = useState("");
   const [materia, setMateria] = useState("");
   const [descripcion, setDescripcion] = useState("");
@@ -668,11 +872,11 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [, setTareas] = useStoreItem(store.tareas);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!titulo.trim() || !materia.trim() || !fechaEntrega) { toast.error("Completa todos los campos obligatorios."); return; }
+    if (!userId) { toast.error("Inicia sesión para guardar."); return; }
     setSaving(true);
-    const nueva: TareaDigital = {
-      id: `t-${Date.now()}`,
+    const nueva: Omit<TareaDigital, "id"> = {
       titulo: titulo.trim(),
       materia: materia.trim(),
       descripcion: descripcion.trim(),
@@ -682,12 +886,16 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
       total: 32,
       estado: "pendiente",
     };
-    setTareas((prev) => [nueva, ...prev]);
-    setTimeout(() => {
+    const { data, error } = await supabase.from("tareas_digitales").insert({ ...nueva, user_id: userId }).select().single();
+    if (error) {
+      toast.error("Error guardando: " + error.message);
       setSaving(false);
-      toast.success("Tarea creada correctamente.");
-      onClose();
-    }, 500);
+      return;
+    }
+    if (data) setTareas((prev) => [data as TareaDigital, ...prev]);
+    setSaving(false);
+    toast.success("Tarea creada correctamente.");
+    onClose();
   };
 
   return (
@@ -732,16 +940,17 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
 /* ─── Nuevo Mensaje ─── */
 
 function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
+  const userId = useAuthUser();
   const [texto, setTexto] = useState("");
   const [grupo, setGrupo] = useState(GRUPOS[0]);
   const [saving, setSaving] = useState(false);
   const [, setMensajes] = useStoreItem(store.mensajes);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!texto.trim()) { toast.error("Escribe un mensaje."); return; }
+    if (!userId) { toast.error("Inicia sesión para guardar."); return; }
     setSaving(true);
-    const nuevo: Mensaje = {
-      id: `m-${Date.now()}`,
+    const nuevo: Omit<Mensaje, "id"> = {
       texto: texto.trim(),
       remitente: "maestro",
       nombre_remitente: "Maestro",
@@ -749,12 +958,16 @@ function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
       leido: true,
       creado_en: new Date().toISOString(),
     };
-    setMensajes((prev) => [...prev, nuevo]);
-    setTimeout(() => {
+    const { data, error } = await supabase.from("mensajes").insert({ ...nuevo, user_id: userId }).select().single();
+    if (error) {
+      toast.error("Error enviando: " + error.message);
       setSaving(false);
-      toast.success("Mensaje enviado.");
-      onClose();
-    }, 400);
+      return;
+    }
+    if (data) setMensajes((prev) => [...prev, data as Mensaje]);
+    setSaving(false);
+    toast.success("Mensaje enviado.");
+    onClose();
   };
 
   return (
@@ -785,6 +998,7 @@ function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
 /* ─── Nuevo Padre ─── */
 
 function NuevoPadreModal({ onClose }: { onClose: () => void }) {
+  const userId = useAuthUser();
   const [nombre, setNombre] = useState("");
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
@@ -794,14 +1008,14 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
   const [alumnos] = useStoreItem(store.alumnos);
   const [, setPadres] = useStoreItem(store.padres);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!nombre.trim() || !nombreHijo.trim()) { toast.error("Nombre del padre y del hijo son obligatorios."); return; }
+    if (!userId) { toast.error("Inicia sesión para guardar."); return; }
 
     const alumno = alumnos.find((a) => a.nombre.toLowerCase().includes(nombreHijo.toLowerCase()) || nombreHijo.toLowerCase().includes(a.nombre.toLowerCase()));
 
     setSaving(true);
-    const nuevo: Padre = {
-      id: `p-${Date.now()}`,
+    const nuevo: Omit<Padre, "id"> = {
       nombre: nombre.trim(),
       telefono: telefono.trim(),
       email: email.trim(),
@@ -812,17 +1026,35 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
       creado_en: new Date().toISOString(),
     };
 
-    setPadres((prev) => [nuevo, ...prev]);
-
-    if (alumno) {
-      syncPadreToTutores(nuevo);
+    const { data, error } = await supabase.from("padres").insert({ ...nuevo, user_id: userId }).select().single();
+    if (error) {
+      toast.error("Error guardando: " + error.message);
+      setSaving(false);
+      return;
+    }
+    if (data) {
+      setPadres((prev) => [data as Padre, ...prev]);
+      // Sincronizar con tutores local si aplica
+      if (alumno) {
+        const tutor = {
+          id: data.id,
+          nombre: data.nombre,
+          telefono: data.telefono,
+          email: data.email,
+          grupo: data.grupo,
+          alumno_id: data.alumno_id,
+          alumno_nombre: data.nombre_hijo,
+          parentesco: "Padre/Madre",
+          activo: true,
+          creado_en: data.creado_en || new Date().toISOString(),
+        };
+        store.tutores.set([tutor, ...store.tutores.get()]);
+      }
     }
 
-    setTimeout(() => {
-      setSaving(false);
-      toast.success("Padre de familia registrado correctamente.");
-      onClose();
-    }, 500);
+    setSaving(false);
+    toast.success("Padre de familia registrado correctamente.");
+    onClose();
   };
 
   return (

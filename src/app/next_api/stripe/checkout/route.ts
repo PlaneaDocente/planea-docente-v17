@@ -2,17 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-  typescript: true,
-});
+export const dynamic = 'force-dynamic';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  {
-    auth: { autoRefreshToken: false, persistSession: false },
+// ── Stripe LAZY (no inicializa si no hay key) ──────────────
+function getStripe(): Stripe | null {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) return null;
+  return new Stripe(key, { typescript: true });
+}
+
+// ── Supabase Admin LAZY ──────────────
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    console.warn("[checkout] SUPABASE_SERVICE_ROLE_KEY no configurado.");
+    return null;
   }
-);
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+// ── Supabase con token del usuario (RLS) ──────────────
+function getSupabaseUserClient(token: string) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,36 +65,61 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ─── AUTENTICACIÓN ───
+    // ─── STRIPE CONFIGURADO? ───
+    const stripe = getStripe();
+    if (!stripe) {
+      return NextResponse.json(
+        { success: false, error: "Stripe no está configurado en el servidor.", code: "STRIPE_NOT_CONFIGURED" },
+        { status: 503 }
+      );
+    }
+
+    // ─── AUTENTICACIÓN (3 estrategias) ───
     let userId: string | null = null;
     let userEmail: string | null = null;
     let userName: string | null = null;
+    let activeClient: any = null;
 
+    // Estrategia 1: Header Authorization con token del usuario
     const authHeader = req.headers.get("authorization");
     if (authHeader?.startsWith("Bearer ")) {
       const token = authHeader.replace("Bearer ", "").trim();
-      const { data: userData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-      if (!authErr && userData?.user) {
-        userId = userData.user.id;
-        userEmail = userData.user.email || null;
+      const supabaseUser = getSupabaseUserClient(token);
+      if (supabaseUser) {
+        const { data: userData, error: authErr } = await supabaseUser.auth.getUser(token);
+        if (!authErr && userData?.user) {
+          userId = userData.user.id;
+          userEmail = userData.user.email || null;
+          activeClient = supabaseUser;
+        }
       }
     }
 
+    // Estrategia 2: Session cookie (fallback admin)
     if (!userId) {
-      try {
-        const { data: sessionData } = await supabaseAdmin.auth.getSession();
-        if (sessionData?.session?.user) {
-          userId = sessionData.session.user.id;
-          userEmail = sessionData.session.user.email || null;
-        }
-      } catch { /* silent */ }
+      const supabaseAdmin = getSupabaseAdmin();
+      if (supabaseAdmin) {
+        try {
+          const { data: sessionData } = await supabaseAdmin.auth.getSession();
+          if (sessionData?.session?.user) {
+            userId = sessionData.session.user.id;
+            userEmail = sessionData.session.user.email || null;
+            activeClient = supabaseAdmin;
+          }
+        } catch { /* silent */ }
+      }
     }
 
+    // Estrategia 3: user_id del body + verificación admin (último recurso)
     if (!userId && body.user_id) {
-      const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(body.user_id);
-      if (userCheck?.user) {
-        userId = userCheck.user.id;
-        userEmail = userCheck.user.email || null;
+      const supabaseAdmin = getSupabaseAdmin();
+      if (supabaseAdmin) {
+        const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(body.user_id);
+        if (userCheck?.user) {
+          userId = userCheck.user.id;
+          userEmail = userCheck.user.email || null;
+          activeClient = supabaseAdmin;
+        }
       }
     }
 
@@ -98,21 +144,25 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── PERFIL Y CUSTOMER ───
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("stripe_customer_id, full_name")
-      .eq("id", userId)
-      .maybeSingle();
-
-    userName = profile?.full_name || null;
-
+    const client = activeClient || getSupabaseAdmin();
     let customerId: string | undefined = undefined;
-    if (profile?.stripe_customer_id) {
-      try {
-        await stripe.customers.retrieve(profile.stripe_customer_id);
-        customerId = profile.stripe_customer_id;
-      } catch {
-        console.warn("[Checkout] Customer inválido, creando nuevo");
+
+    if (client) {
+      const { data: profile } = await client
+        .from("profiles")
+        .select("stripe_customer_id, full_name")
+        .eq("id", userId)
+        .maybeSingle();
+
+      userName = profile?.full_name || null;
+
+      if (profile?.stripe_customer_id) {
+        try {
+          await stripe.customers.retrieve(profile.stripe_customer_id);
+          customerId = profile.stripe_customer_id;
+        } catch {
+          console.warn("[Checkout] Customer inválido, creando nuevo");
+        }
       }
     }
 
@@ -123,7 +173,9 @@ export async function POST(req: NextRequest) {
         metadata: { supabase_user_id: userId, plan_id: plan_id || "" },
       });
       customerId = customer.id;
-      await supabaseAdmin.from("profiles").update({ stripe_customer_id: customerId }).eq("id", userId);
+      if (client) {
+        await client.from("profiles").update({ stripe_customer_id: customerId }).eq("id", userId);
+      }
     }
 
     // ─── SESIÓN CHECKOUT ───
