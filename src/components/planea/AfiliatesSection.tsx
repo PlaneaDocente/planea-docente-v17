@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -6,14 +5,17 @@ import { motion } from "framer-motion";
 import {
   Award, Copy, CheckCircle2, TrendingUp, DollarSign,
   Users, Share2, Loader2, RefreshCw, Globe, Gift, BarChart3,
+  AlertCircle, X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { useAppStore } from "@/store/app-store";
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   TIPOS
+   ═══════════════════════════════════════════════════════════════════════════ */
 interface AffiliateData {
   id: string;
   codigo_referido: string;
@@ -39,56 +41,93 @@ function formatMXN(cents: number): string {
   return `$${(cents / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} MXN`;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPONENTE PRINCIPAL
+   ═══════════════════════════════════════════════════════════════════════════ */
 export default function AfiliatesSection() {
-  const { currentUser } = useAppStore();
   const [affiliate, setAffiliate] = useState<AffiliateData | null>(null);
   const [referrals, setReferrals] = useState<ReferralRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [tablesExist, setTablesExist] = useState(true);
 
+  /* ── Cargar usuario y datos de afiliado ───────────────────────────────── */
   const loadAffiliate = useCallback(async (uid: string) => {
-    const { data } = await supabase
-      .from("affiliate_programs")
-      .select("*")
-      .eq("user_id", uid)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from("affiliate_programs")
+        .select("*")
+        .eq("user_id", uid)
+        .maybeSingle();
 
-    if (data) {
-      setAffiliate(data as AffiliateData);
-      const { data: refs } = await supabase
-        .from("affiliate_referrals")
-        .select("id, email_referido, estado, comision_centavos, fecha_registro")
-        .eq("affiliate_id", data.id)
-        .order("fecha_registro", { ascending: false })
-        .limit(10);
-      setReferrals((refs ?? []) as ReferralRecord[]);
+      if (error) {
+        if (error.message.includes("does not exist") || error.code === "42P01") {
+          setTablesExist(false);
+          setLoading(false);
+          return;
+        }
+        throw error;
+      }
+
+      if (data) {
+        setAffiliate(data as AffiliateData);
+        const { data: refs, error: refsError } = await supabase
+          .from("affiliate_referrals")
+          .select("id, email_referido, estado, comision_centavos, fecha_registro")
+          .eq("affiliate_id", data.id)
+          .order("fecha_registro", { ascending: false })
+          .limit(10);
+
+        if (!refsError) {
+          setReferrals((refs ?? []) as ReferralRecord[]);
+        }
+      }
+    } catch (err) {
+      console.error("[Afiliados] Error cargando datos:", err);
+      toast.error("Error al cargar datos de afiliado");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
-    if (currentUser?.id) {
-      loadAffiliate(currentUser.id);
-    } else {
-      setLoading(false);
-    }
-  }, [currentUser, loadAffiliate]);
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser(session.user);
+        await loadAffiliate(session.user.id);
+      } else {
+        setLoading(false);
+      }
+    };
+    init();
+  }, [loadAffiliate]);
 
+  /* ── Crear cuenta de afiliado ─────────────────────────────────────────── */
   const handleCreate = async () => {
-    if (!currentUser) return;
+    if (!user) {
+      toast.error("Debes iniciar sesión para ser afiliado");
+      return;
+    }
+    if (!tablesExist) {
+      toast.error("El sistema de afiliados no está configurado. Contacta soporte.");
+      return;
+    }
+
     setCreating(true);
     try {
       const code = `PLANEA${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-      const displayName =
-        currentUser.user_metadata?.full_name ?? currentUser.email ?? "Maestro";
+      const displayName = user.user_metadata?.full_name ?? user.email ?? "Maestro";
+
       const { data, error } = await supabase
         .from("affiliate_programs")
         .insert({
-          user_id: currentUser.id,
+          user_id: user.id,
           codigo_referido: code,
           nombre_afiliado: displayName,
-          email_afiliado: currentUser.email ?? "",
+          email_afiliado: user.email ?? "",
           porcentaje_comision: 20,
           estado: "activo",
         })
@@ -97,27 +136,33 @@ export default function AfiliatesSection() {
 
       if (error) throw error;
       setAffiliate(data as AffiliateData);
-      toast.success("¡Cuenta de afiliado creada! Ya puedes empezar a ganar comisiones.");
-    } catch (err) {
+      toast.success("¡Cuenta de afiliado creada! Comparte tu enlace y empieza a ganar.");
+    } catch (err: any) {
       console.error(err);
-      toast.error("Error al crear la cuenta de afiliado. Intenta de nuevo.");
+      toast.error("Error al crear afiliado: " + (err.message || "Intenta de nuevo"));
     } finally {
       setCreating(false);
     }
   };
 
+  /* ── Copiar enlace ────────────────────────────────────────────────────── */
   const referralLink = affiliate
-    ? `https://planeadocente.com/?ref=${affiliate.codigo_referido}`
+    ? `${process.env.NEXT_PUBLIC_SITE_URL || "https://planeadocente.com"}/?ref=${affiliate.codigo_referido}`
     : "";
 
   const handleCopy = async () => {
     if (!referralLink) return;
-    await navigator.clipboard.writeText(referralLink);
-    setCopied(true);
-    toast.success("¡Enlace copiado al portapapeles!");
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(referralLink);
+      setCopied(true);
+      toast.success("¡Enlace copiado al portapapeles!");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("No se pudo copiar. Copia manualmente.");
+    }
   };
 
+  /* ── Estados de carga ─────────────────────────────────────────────────── */
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -126,9 +171,27 @@ export default function AfiliatesSection() {
     );
   }
 
+  if (!tablesExist) {
+    return (
+      <div className="space-y-6">
+        <HeroBanner />
+        <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/30">
+          <CardContent className="py-8 text-center">
+            <AlertCircle className="w-10 h-10 text-amber-600 mx-auto mb-3" />
+            <h3 className="font-semibold text-amber-800 dark:text-amber-300 mb-2">Programa de Afiliados no configurado</h3>
+            <p className="text-sm text-amber-700 dark:text-amber-400 max-w-md mx-auto">
+              Las tablas de afiliados no existen en la base de datos. Contacta al administrador para activar esta función.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <HeroBanner />
+
       {!affiliate ? (
         <JoinAffiliateCta onCreate={handleCreate} creating={creating} />
       ) : (
@@ -136,32 +199,37 @@ export default function AfiliatesSection() {
           <StatsCards affiliate={affiliate} />
           <ReferralLinkCard link={referralLink} code={affiliate.codigo_referido} onCopy={handleCopy} copied={copied} />
           <HowToShareCard />
-          <CommissionHistoryCard referrals={referrals} onRefresh={() => currentUser && loadAffiliate(currentUser.id)} />
+          <CommissionHistoryCard referrals={referrals} onRefresh={() => user && loadAffiliate(user.id)} />
         </>
       )}
+
       <ProgramDetailsCard />
     </div>
   );
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SUB-COMPONENTES
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 function HeroBanner() {
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 rounded-2xl p-8 text-white shadow-xl"
+      className="bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 rounded-2xl p-6 md:p-8 text-white shadow-xl"
     >
       <div className="flex flex-col md:flex-row items-center gap-6">
-        <div className="w-20 h-20 bg-white/20 rounded-2xl flex items-center justify-center shrink-0">
-          <Award className="w-10 h-10" />
+        <div className="w-16 h-16 md:w-20 md:h-20 bg-white/20 rounded-2xl flex items-center justify-center shrink-0">
+          <Award className="w-8 h-8 md:w-10 md:h-10" />
         </div>
         <div className="flex-1 text-center md:text-left">
-          <h2 className="text-3xl font-bold mb-2">Programa de Afiliados</h2>
-          <p className="text-white/80 text-lg mb-1">Gana dinero recomendando PlaneaDocente</p>
+          <h2 className="text-2xl md:text-3xl font-bold mb-2">Programa de Afiliados</h2>
+          <p className="text-white/80 text-base md:text-lg mb-1">Gana dinero recomendando PlaneaDocente</p>
           <p className="text-white/60 text-sm">20% de comisión · Sin límite de ganancias · Pagos automáticos</p>
         </div>
-        <div className="flex flex-col gap-2 shrink-0">
-          {["💰 20% de comisión", "🔗 Enlace único", "📊 Estadísticas en tiempo real"].map((f) => (
+        <div className="flex flex-col gap-2 shrink-0 w-full md:w-auto">
+          {["💰 20% comisión", "🔗 Enlace único", "📊 Estadísticas"].map((f) => (
             <div key={f} className="flex items-center gap-2 bg-white/20 rounded-xl px-4 py-2 text-sm">
               <CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />
               <span>{f}</span>
@@ -178,13 +246,13 @@ function JoinAffiliateCta({ onCreate, creating }: { onCreate: () => void; creati
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-card rounded-2xl p-8 border border-border text-center shadow-sm"
+      className="bg-card rounded-2xl p-6 md:p-8 border border-border text-center shadow-sm"
     >
       <div className="w-16 h-16 bg-amber-100 dark:bg-amber-950 rounded-2xl flex items-center justify-center mx-auto mb-4">
         <Gift className="w-8 h-8 text-amber-600" />
       </div>
       <h3 className="text-xl font-bold text-foreground mb-2">¡Únete al programa de afiliados!</h3>
-      <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+      <p className="text-muted-foreground mb-6 max-w-md mx-auto text-sm">
         Crea tu cuenta de afiliado gratis y empieza a ganar el 20% de comisión por cada maestro
         que se suscriba usando tu enlace de referido.
       </p>
@@ -214,11 +282,10 @@ function JoinAffiliateCta({ onCreate, creating }: { onCreate: () => void; creati
 }
 
 function StatsCards({ affiliate }: { affiliate: AffiliateData }) {
-  const pendingCents = affiliate.total_ganado_centavos - affiliate.total_pagado_centavos;
-  const conversionRate =
-    affiliate.total_referidos > 0
-      ? Math.round((affiliate.total_convertidos / affiliate.total_referidos) * 100)
-      : 0;
+  const pendingCents = Math.max(0, affiliate.total_ganado_centavos - affiliate.total_pagado_centavos);
+  const conversionRate = affiliate.total_referidos > 0
+    ? Math.round((affiliate.total_convertidos / affiliate.total_referidos) * 100)
+    : 0;
 
   const stats = [
     { label: "Total Referidos", value: affiliate.total_referidos.toString(), icon: Users, color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-950" },
@@ -237,7 +304,7 @@ function StatsCards({ affiliate }: { affiliate: AffiliateData }) {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.08 }}
-            className={`${s.bg} rounded-2xl p-4`}
+            className={`${s.bg} rounded-2xl p-4 border border-transparent hover:border-border transition-colors`}
           >
             <div className="flex items-center gap-2 mb-2">
               <Icon className={`w-4 h-4 ${s.color}`} />
@@ -278,12 +345,12 @@ function ReferralLinkCard({
             {copied ? "Copiado" : "Copiar"}
           </Button>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="bg-muted rounded-xl px-4 py-2 flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Código:</span>
             <span className="font-mono font-bold text-foreground">{code}</span>
           </div>
-          <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+          <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 border-emerald-200">
             Activo
           </Badge>
         </div>
@@ -294,12 +361,12 @@ function ReferralLinkCard({
 
 function HowToShareCard() {
   const channels = [
-    { icon: "💬", name: "WhatsApp", desc: "Comparte en grupos de maestros" },
-    { icon: "📘", name: "Facebook", desc: "Publica en grupos educativos" },
-    { icon: "📸", name: "Instagram", desc: "Stories y publicaciones" },
-    { icon: "🐦", name: "Twitter/X", desc: "Tuits y hilos educativos" },
-    { icon: "📧", name: "Email", desc: "Envía a colegas directamente" },
-    { icon: "🎓", name: "Grupos SEP", desc: "Comparte en reuniones de CTE" },
+    { icon: "💬", name: "WhatsApp", desc: "Grupos de maestros" },
+    { icon: "📘", name: "Facebook", desc: "Grupos educativos" },
+    { icon: "📸", name: "Instagram", desc: "Stories y posts" },
+    { icon: "🐦", name: "Twitter/X", desc: "Hilos educativos" },
+    { icon: "📧", name: "Email", desc: "Colegas directos" },
+    { icon: "🎓", name: "Grupos SEP", desc: "Reuniones CTE" },
   ];
 
   return (
@@ -313,7 +380,7 @@ function HowToShareCard() {
       <CardContent>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {channels.map((c) => (
-            <div key={c.name} className="flex items-center gap-3 bg-muted/50 rounded-xl p-3">
+            <div key={c.name} className="flex items-center gap-3 bg-muted/50 rounded-xl p-3 hover:bg-muted transition-colors">
               <span className="text-2xl">{c.icon}</span>
               <div>
                 <p className="text-sm font-medium text-foreground">{c.name}</p>
@@ -334,10 +401,10 @@ function CommissionHistoryCard({
   onRefresh: () => void;
 }) {
   const statusColor: Record<string, string> = {
-    registrado: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
-    suscrito: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
-    pagado: "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400",
-    cancelado: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400",
+    registrado: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400 border-blue-200",
+    suscrito: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 border-emerald-200",
+    pagado: "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400 border-violet-200",
+    cancelado: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400 border-red-200",
   };
 
   return (
@@ -364,7 +431,7 @@ function CommissionHistoryCard({
         ) : (
           <div className="space-y-2">
             {referrals.map((r) => (
-              <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl bg-muted/40">
+              <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors">
                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                   <Users className="w-4 h-4 text-primary" />
                 </div>
@@ -375,9 +442,9 @@ function CommissionHistoryCard({
                   </p>
                 </div>
                 <div className="text-right shrink-0">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[r.estado] ?? "bg-muted text-muted-foreground"}`}>
+                  <Badge variant="outline" className={`text-xs px-2 py-0.5 ${statusColor[r.estado] ?? "bg-muted text-muted-foreground"}`}>
                     {r.estado}
-                  </span>
+                  </Badge>
                   {r.comision_centavos > 0 && (
                     <p className="text-xs text-emerald-600 font-semibold mt-0.5">
                       +{formatMXN(r.comision_centavos)}
@@ -406,9 +473,9 @@ function ProgramDetailsCard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           {[
             { label: "Comisión", value: "20% por suscripción", icon: DollarSign },
-            { label: "Duración de cookie", value: "30 días", icon: Globe },
+            { label: "Duración cookie", value: "30 días", icon: Globe },
             { label: "Mínimo de pago", value: "$500 MXN", icon: TrendingUp },
-            { label: "Frecuencia de pago", value: "Mensual", icon: CheckCircle2 },
+            { label: "Frecuencia", value: "Mensual", icon: CheckCircle2 },
           ].map((d) => {
             const Icon = d.icon;
             return (

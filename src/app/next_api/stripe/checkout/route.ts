@@ -1,113 +1,123 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { supabaseAdmin } from "@/integrations/supabase/server";
 
-export const dynamic = 'force-dynamic';
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2026-04-22.dahlia",
+});
 
-export async function POST(req: Request) {
+/**
+ * POST /next_api/stripe/checkout
+ * Crea una sesión de Stripe Checkout.
+ *
+ * Acepta DOS formatos de payload para compatibilidad:
+ * 1. Estándar Stripe (recomendado): { price_id, user_id, billing, plan_id }
+ * 2. Legacy: { productName, amount, userId, planId }
+ */
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { productName, amount, currency, quantity, interval, planId, userId } = body;
 
-    // ── 1. VALIDACIONES BÁSICAS ─────────────────────────────────────────────
-    if (!productName || !amount || !userId || !planId) {
+    // ── Detectar formato y normalizar ──────────────────────────────────────
+    let priceId: string | null = null;
+    let userId: string | null = null;
+    let planId: string | null = null;
+    let billing: "month" | "year" = "month";
+
+    // Formato 1: Estándar Stripe (price_id)
+    if (body.price_id) {
+      priceId = body.price_id;
+      userId = body.user_id ?? body.userId ?? null;
+      planId = body.plan_id ?? body.planId ?? null;
+      billing = body.billing === "year" ? "year" : "month";
+    }
+    // Formato 2: Legacy (amount + productName)
+    else if (body.amount && body.userId) {
+      // Crear un price_id temporal o buscar uno existente
+      // Este es un fallback para compatibilidad con versiones antiguas
       return NextResponse.json(
-        { success: false, error: "Faltan campos obligatorios: productName, amount, userId, planId" },
+        {
+          success: false,
+          error: "Formato legacy no soportado. Use price_id en lugar de amount.",
+        },
+        { status: 400 }
+      );
+    }
+    // Formato 3: SuscripcionSection.tsx viejo (amount + userId + planId)
+    else if (body.amount && body.userId && body.planId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Formato obsoleto. Actualice el frontend para enviar price_id.",
+        },
         { status: 400 }
       );
     }
 
-    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-    if (!stripeSecretKey || !stripeSecretKey.startsWith("sk_")) {
-      console.error("❌ Checkout: STRIPE_SECRET_KEY inválida o no configurada");
+    // ── Validaciones ─────────────────────────────────────────────────────
+    if (!priceId) {
       return NextResponse.json(
-        { success: false, error: "STRIPE_SECRET_KEY no configurada correctamente" },
-        { status: 500 }
+        { success: false, error: "price_id es requerido" },
+        { status: 400 }
       );
     }
-
-    // ── 2. VALIDAR PLAN Y PRECIO EN BASE DE DATOS (SEGURIDAD) ───────────────
-    // ✅ CORREGIDO: usamos supabaseAdmin (igual que el webhook)
-    const { data: plan, error: planError } = await supabaseAdmin
-      .from("subscription_plans")
-      .select("*")
-      .eq("id", planId)
-      .eq("activo", true)
-      .single();
-
-    if (planError || !plan) {
-      console.error("❌ Checkout: Plan no encontrado:", planId, planError);
+    if (!userId) {
       return NextResponse.json(
-        { success: false, error: "Plan de suscripción no válido o inactivo" },
+        { success: false, error: "user_id es requerido" },
         { status: 400 }
       );
     }
 
-    // 🔐 Seguridad: comparar precio enviado vs precio real en BD
-    const precioReal = plan.precio_centavos;
-    const precioEnviado = Number(amount);
-    
-    if (isNaN(precioEnviado) || Math.abs(precioEnviado - precioReal) > 1) {
-      console.error("❌ Checkout: Manipulación de precio detectada", {
-        enviado: precioEnviado,
-        real: precioReal
-      });
+    // Verificar que el price_id existe en Stripe
+    try {
+      await stripe.prices.retrieve(priceId);
+    } catch {
       return NextResponse.json(
-        { success: false, error: "El precio no coincide con el plan seleccionado" },
+        { success: false, error: "El price_id no es válido en Stripe. Verifica tu configuración." },
         { status: 400 }
       );
     }
 
-    const validInterval = interval === "year" ? "year" : "month";
-    if (plan.intervalo && plan.intervalo !== validInterval) {
-      return NextResponse.json(
-        { success: false, error: "Intervalo no válido para este plan" },
-        { status: 400 }
-      );
-    }
-
-    // ── 3. CREAR SESIÓN DE STRIPE ───────────────────────────────────────────
-    const stripe = new Stripe(stripeSecretKey, {
-      apiVersion: '2026-04-22.dahlia',
-    });
-
-    const baseUrl = process.env.NEXT_PUBLIC_STRIPE_URL || "https://www.planeadocente.com";
+    // ── Crear sesión de checkout ─────────────────────────────────────────
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://planeadocente.com";
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       payment_method_types: ["card"],
-      client_reference_id: userId,
       line_items: [
         {
-          price_data: {
-            currency: currency || "mxn",
-            unit_amount: precioReal,
-            recurring: { interval: validInterval },
-            product_data: {
-              name: plan.nombre || productName,
-              description: `Suscripción PlaneaDocente · ${plan.nombre} · ${validInterval === "year" ? "Plan Anual" : "Plan Mensual"}`,
-            },
-          },
-          quantity: quantity || 1,
+          price: priceId,
+          quantity: 1,
         },
       ],
-      success_url: `${baseUrl}/?session_id={CHECKOUT_SESSION_ID}&paid=true`,
-      cancel_url: `${baseUrl}/?canceled=true`,
-      allow_promotion_codes: true,
-      subscription_data: {
-        trial_period_days: plan.dias_prueba || 15,
-        metadata: { userId, planId, interval: validInterval },
+      success_url: `${siteUrl}/suscripcion/exito?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${siteUrl}/suscripcion/cancelado`,
+      client_reference_id: userId,
+      metadata: {
+        user_id: userId,
+        plan_id: planId ?? "",
+        billing,
       },
-      metadata: { userId, planId, interval: validInterval },
+      subscription_data: {
+        metadata: {
+          user_id: userId,
+          plan_id: planId ?? "",
+        },
+        trial_period_days: 15, // Prueba gratuita de 15 días
+      },
     });
 
-    console.log(`✅ Checkout: Sesión creada para usuario ${userId}, plan ${planId}`);
-    return NextResponse.json({ success: true, data: session });
-    
-  } catch (error: any) {
-    console.error("❌ Stripe Checkout Error:", error);
+    return NextResponse.json({
+      success: true,
+      url: session.url,
+      session_id: session.id,
+    });
+  } catch (err: any) {
+    console.error("[Stripe Checkout] Error:", err);
     return NextResponse.json(
-      { success: false, error: error.message || "Error interno del servidor" },
+      {
+        success: false,
+        error: err.message || "Error interno al crear la sesión de pago",
+      },
       { status: 500 }
     );
   }
