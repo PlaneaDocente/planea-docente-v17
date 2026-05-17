@@ -14,7 +14,6 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
-// ─── TIPOS ───
 interface SubscriptionPlan {
   id: string;
   nombre: string;
@@ -39,7 +38,6 @@ interface CurrentSubscription {
 
 type LoadingState = "idle" | "loading" | "error" | "ready";
 
-// ─── UTILIDADES ───
 function formatPrice(cents: number | null, pesos: number | null): string {
   if (cents && cents > 0) {
     return `$${(cents / 100).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
@@ -74,7 +72,10 @@ const FALLBACK_PLANS: SubscriptionPlan[] = [
   },
 ];
 
-// ─── COMPONENTE ───
+function isValidStripePriceId(val: unknown): val is string {
+  return typeof val === "string" && val.trim().startsWith("price_") && val.trim().length > 6;
+}
+
 export default function SuscripcionClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -91,20 +92,17 @@ export default function SuscripcionClient() {
   const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
-  // ─── CARGAR DATOS ───
   const loadData = useCallback(async () => {
     setLoadState("loading");
     setErrorMsg(null);
 
     try {
-      // 1. Obtener sesión + token JWT
       const { data: sessionData } = await supabase.auth.getSession();
       const uid = sessionData?.session?.user?.id ?? null;
       const token = sessionData?.session?.access_token ?? null;
       setUserId(uid);
       setSessionToken(token);
 
-      // 2. Cargar planes (API + Supabase fallback)
       let normalizedPlans: SubscriptionPlan[] = [];
       let apiSuccess = false;
 
@@ -117,7 +115,8 @@ export default function SuscripcionClient() {
             ...p,
             precio_centavos: p.precio_centavos ?? (p.precio_mensual ? p.precio_mensual * 100 : 0),
             precio_centavos_anual: p.precio_centavos_anual ?? (p.precio_anual ? p.precio_anual * 100 : null),
-            stripe_price_id_anual: p.stripe_price_id_anual ?? null,
+            stripe_price_id: p.stripe_price_id || null,
+            stripe_price_id_anual: p.stripe_price_id_anual || null,
             caracteristicas: Array.isArray(p.caracteristicas) ? p.caracteristicas : [],
             dias_prueba: p.dias_prueba ?? 15,
           }));
@@ -137,6 +136,8 @@ export default function SuscripcionClient() {
           ...p,
           precio_centavos: p.precio_centavos ?? (p.precio_mensual ? p.precio_mensual * 100 : 0),
           precio_centavos_anual: p.precio_centavos_anual ?? (p.precio_anual ? p.precio_anual * 100 : null),
+          stripe_price_id: p.stripe_price_id || null,
+          stripe_price_id_anual: p.stripe_price_id_anual || null,
           caracteristicas: Array.isArray(p.caracteristicas) ? p.caracteristicas : [],
           dias_prueba: p.dias_prueba ?? 15,
         }));
@@ -147,14 +148,14 @@ export default function SuscripcionClient() {
         toast.warning("Mostrando planes de respaldo.");
       }
 
+      // Verificar Stripe: al menos UN plan debe tener price_id válido
       const hasStripeIds = normalizedPlans.some((p) => {
         const pid = billing === "annual" ? p.stripe_price_id_anual : p.stripe_price_id;
-        return pid && pid.startsWith("price_");
+        return isValidStripePriceId(pid);
       });
       setStripeConfigured(hasStripeIds);
       setPlans(normalizedPlans);
 
-      // 3. Cargar suscripción actual
       if (uid) {
         let subData: any = null;
         try {
@@ -204,14 +205,12 @@ export default function SuscripcionClient() {
     }
   }, [canceled]);
 
-  // ─── CHECKOUT CON TOKEN JWT ───
   const handleSubscribe = useCallback(async (plan: SubscriptionPlan) => {
     setCheckoutLoading(true);
     setActivePlanId(plan.id);
     setErrorMsg(null);
 
     try {
-      // Verificar sesión actual
       const { data: sessionData } = await supabase.auth.getSession();
       const uid = sessionData?.session?.user?.id;
       const token = sessionData?.session?.access_token;
@@ -222,24 +221,23 @@ export default function SuscripcionClient() {
         return;
       }
 
-      const priceId = billing === "annual"
-        ? (plan.stripe_price_id_anual || plan.stripe_price_id)
-        : plan.stripe_price_id;
+      const rawPriceId = billing === "annual" ? (plan.stripe_price_id_anual || plan.stripe_price_id) : plan.stripe_price_id;
 
-      if (!priceId || !priceId.startsWith("price_")) {
-        toast.error(`⚠️ El plan "${plan.nombre}" no tiene precio de Stripe configurado.`, { duration: 6000 });
+      // Validación ULTRA-estricta en frontend
+      if (!isValidStripePriceId(rawPriceId)) {
+        toast.error(
+          `⚠️ El plan "${plan.nombre}" no tiene un precio de Stripe configurado. Contacta al administrador.`,
+          { duration: 8000 }
+        );
         setCheckoutLoading(false);
         setActivePlanId(null);
         return;
       }
 
-      // ─── ENVIAR TOKEN JWT EN HEADER ───
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
+      const priceId = rawPriceId.trim();
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const res = await fetch("/next_api/stripe/checkout", {
         method: "POST",
@@ -248,7 +246,7 @@ export default function SuscripcionClient() {
           price_id: priceId,
           billing: billing === "annual" ? "year" : "month",
           plan_id: plan.id,
-          user_id: uid, // Backup por si el token falla
+          user_id: uid,
         }),
       });
 
@@ -261,7 +259,9 @@ export default function SuscripcionClient() {
         if (code === "UNAUTHENTICATED" || res.status === 401) {
           toast.error("❌ Sesión expirada. Vuelve a iniciar sesión.", { duration: 8000 });
           router.push("/login?redirect=/suscripcion");
-        } else if (code === "STRIPE_RESOURCE_MISSING" || code === "INVALID_PRICE_ID") {
+        } else if (code === "STRIPE_RESOURCE_MISSING") {
+          toast.error(`❌ ${detail}`, { duration: 8000 });
+        } else if (code === "INVALID_PRICE_ID") {
           toast.error(`❌ ${detail}`, { duration: 8000 });
         } else {
           toast.error(detail);
@@ -286,7 +286,6 @@ export default function SuscripcionClient() {
     }
   }, [billing, router]);
 
-  // ─── RENDER ───
   if (loadState === "loading") {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 flex items-center justify-center p-4">
@@ -301,7 +300,6 @@ export default function SuscripcionClient() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 py-12 px-4">
       <div className="max-w-6xl mx-auto space-y-10">
-        {/* Header */}
         <div className="text-center space-y-4">
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <Badge variant="secondary" className="mb-2 text-sm">
@@ -317,7 +315,6 @@ export default function SuscripcionClient() {
           </motion.div>
         </div>
 
-        {/* Alerta Stripe */}
         {!stripeConfigured && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto">
             <Card className="border-amber-300 bg-amber-50/80">
@@ -345,7 +342,6 @@ export default function SuscripcionClient() {
           </motion.div>
         )}
 
-        {/* Banner login */}
         {!userId && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-2xl mx-auto">
             <Card className="border-blue-200 bg-blue-50/50">
@@ -360,7 +356,6 @@ export default function SuscripcionClient() {
           </motion.div>
         )}
 
-        {/* Banner suscripción activa */}
         {currentSubscription && (
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="max-w-2xl mx-auto">
             <Card className="border-green-200 bg-green-50/50">
@@ -377,7 +372,6 @@ export default function SuscripcionClient() {
           </motion.div>
         )}
 
-        {/* Error */}
         {errorMsg && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-2xl mx-auto">
             <Card className="border-red-200 bg-red-50/50">
@@ -392,7 +386,6 @@ export default function SuscripcionClient() {
           </motion.div>
         )}
 
-        {/* Toggle Mensual/Anual */}
         <div className="flex justify-center">
           <div className="bg-white rounded-full p-1.5 shadow-lg border flex items-center gap-2">
             <button onClick={() => setBilling("monthly")} className={`px-6 py-2.5 rounded-full text-sm font-medium transition-all ${billing === "monthly" ? "bg-indigo-600 text-white shadow-md" : "text-slate-600 hover:text-slate-900"}`}>Mensual</button>
@@ -400,21 +393,24 @@ export default function SuscripcionClient() {
           </div>
         </div>
 
-        {/* Grid de planes */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
           {plans.map((plan, index) => {
             const isPopular = plan.nombre.toLowerCase().includes("profesional");
             const isInstitutional = plan.nombre.toLowerCase().includes("institucional");
             const isCurrent = currentSubscription?.plan_id === plan.id;
+
+            const rawPriceId = billing === "annual"
+              ? (plan.stripe_price_id_anual || plan.stripe_price_id)
+              : plan.stripe_price_id;
+
+            const hasStripePrice = isValidStripePriceId(rawPriceId);
+            const canSubscribe = hasStripePrice && !!userId && !isCurrent;
+            const isProcessing = checkoutLoading && activePlanId === plan.id;
+
             const monthlyPrice = plan.precio_centavos ?? plan.precio_mensual ?? 0;
             const annualPrice = plan.precio_centavos_anual ?? plan.precio_anual ?? 0;
             const displayPrice = billing === "annual" ? annualPrice : monthlyPrice;
             const hasRealPrice = displayPrice > 0;
-            const priceId = billing === "annual" ? plan.stripe_price_id_anual : plan.stripe_price_id;
-            const hasStripePrice = !!priceId && priceId.startsWith("price_");
-            const canSubscribe = hasStripePrice && !!userId && !isCurrent;
-            const isFreePlan = !hasRealPrice && !hasStripePrice;
-            const isProcessing = checkoutLoading && activePlanId === plan.id;
 
             return (
               <motion.div key={plan.id} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.15, duration: 0.5 }}>
@@ -447,7 +443,7 @@ export default function SuscripcionClient() {
                       {billing === "annual" && monthlyPrice > 0 && annualPrice > 0 && (
                         <p className="text-xs text-green-600 font-medium">Ahorras {formatPrice(monthlyPrice * 12 - annualPrice, null)} al año</p>
                       )}
-                      {!hasRealPrice && !isFreePlan && (
+                      {!hasRealPrice && (
                         <p className="text-xs text-amber-600 flex items-center justify-center gap-1 mt-1"><AlertCircle className="w-3 h-3" /> Precio pendiente de configuración</p>
                       )}
                       {plan.dias_prueba && plan.dias_prueba > 0 && hasRealPrice && (
@@ -467,23 +463,23 @@ export default function SuscripcionClient() {
                         <Button disabled className="w-full gap-2 bg-green-600 hover:bg-green-600 cursor-default"><Check className="w-4 h-4" /> Plan Actual</Button>
                       ) : (
                         <>
-                          <Button onClick={() => handleSubscribe(plan)} disabled={isProcessing || !canSubscribe} className={`w-full gap-2 ${isPopular ? "bg-indigo-600 hover:bg-indigo-700" : ""} ${!canSubscribe ? "bg-slate-200 text-slate-500 cursor-not-allowed hover:bg-slate-200" : ""}`}>
+                          <Button
+                            onClick={() => handleSubscribe(plan)}
+                            disabled={isProcessing || !canSubscribe}
+                            className={`w-full gap-2 ${isPopular ? "bg-indigo-600 hover:bg-indigo-700" : ""} ${!canSubscribe ? "bg-slate-200 text-slate-500 cursor-not-allowed hover:bg-slate-200" : ""}`}
+                          >
                             {isProcessing ? <><Loader2 className="w-4 h-4 animate-spin" /> Redirigiendo...</>
                             : !userId ? "Inicia sesión para suscribirte"
-                            : isFreePlan ? "Activar gratis"
                             : !hasStripePrice ? <><AlertCircle className="w-4 h-4" /> Configuración pendiente</>
                             : <><>Elegir Plan</><ArrowRight className="w-4 h-4" /></>}
                           </Button>
-                          {billing === "annual" && hasStripePrice && plan.stripe_price_id_anual && (
-                            <p className="text-[10px] text-center text-slate-400">Pago anual con descuento aplicado</p>
+                          {!hasStripePrice && userId && !isCurrent && (
+                            <p className="text-xs text-center text-amber-600 flex items-center justify-center gap-1"><Info className="w-3 h-3" /> Plan pendiente de configuración de pago.</p>
+                          )}
+                          {canSubscribe && (
+                            <p className="text-[10px] text-center text-slate-400 flex items-center justify-center gap-1"><Shield className="w-3 h-3" /> Pago seguro por Stripe · Cancela cuando quieras</p>
                           )}
                         </>
-                      )}
-                      {!hasStripePrice && userId && !isFreePlan && !isCurrent && (
-                        <p className="text-xs text-center text-amber-600 flex items-center justify-center gap-1"><Info className="w-3 h-3" /> Plan pendiente de configuración de pago.</p>
-                      )}
-                      {canSubscribe && (
-                        <p className="text-[10px] text-center text-slate-400 flex items-center justify-center gap-1"><Shield className="w-3 h-3" /> Pago seguro por Stripe · Cancela cuando quieras</p>
                       )}
                     </div>
                   </CardContent>
@@ -493,7 +489,6 @@ export default function SuscripcionClient() {
           })}
         </div>
 
-        {/* Footer */}
         <div className="text-center space-y-2 pt-8 border-t border-slate-200">
           <p className="text-sm text-muted-foreground">Pagos procesados de forma segura por <span className="font-semibold">Stripe</span>.</p>
           <p className="text-xs text-muted-foreground">¿Tienes dudas? <a href="mailto:soporte@planeadocente.com" className="underline hover:text-indigo-600 transition-colors">soporte@planeadocente.com</a></p>
