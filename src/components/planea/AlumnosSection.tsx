@@ -1,23 +1,71 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, Plus, Search, Trash2, Check, X, Loader2,
   UserCircle, Phone, Mail, MessageSquare,
-  ChevronDown, HeartHandshake, ClipboardList, History
+  ChevronDown, HeartHandshake, ClipboardList, History,
+  AlertTriangle, RefreshCw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import {
-  store, useStoreItem, GRUPOS, formatDate, syncTutorToPadres,
-  type Alumno, type Tutor, type Observacion,
-} from "./planeadocente-store";
+import { supabase } from "@/integrations/supabase/client";
 
-/* ═════════════════════ TIPOS LOCALES ═════════════════════ */
+/* ═════════════════════ TIPOS ═════════════════════ */
+
+interface Alumno {
+  id: string;
+  user_id: string;
+  nombre: string;
+  apellidos?: string;
+  grupo: string;
+  grado?: string;
+  turno?: string;
+  curp?: string;
+  fecha_nacimiento?: string;
+  tutor_nombre?: string;
+  tutor_email?: string;
+  tutor_telefono?: string;
+  foto_url?: string;
+  activo: boolean;
+  creado_en: string;
+}
+
+interface Tutor {
+  id: string;
+  user_id: string;
+  alumno_id: string;
+  alumno_nombre: string;
+  nombre: string;
+  parentesco: string;
+  telefono?: string;
+  email?: string;
+  creado_en: string;
+}
+
+interface Observacion {
+  id: string;
+  user_id: string;
+  alumno_id: string;
+  alumno_nombre: string;
+  fecha: string;
+  tipo: "positiva" | "negativa" | "neutra";
+  descripcion: string;
+  creado_en: string;
+}
 
 type AlumnoTab = "registro" | "historial" | "tutores" | "observaciones";
+
+const GRUPOS = [
+  "1° A", "1° B", "1° C", "1° D",
+  "2° A", "2° B", "2° C", "2° D",
+  "3° A", "3° B", "3° C", "3° D",
+  "4° A", "4° B", "4° C", "4° D",
+  "5° A", "5° B", "5° C", "5° D",
+  "6° A", "6° B", "6° C", "6° D",
+];
 
 const TABS: { id: AlumnoTab; label: string; icon: React.ElementType }[] = [
   { id: "registro", label: "Registro", icon: ClipboardList },
@@ -25,6 +73,15 @@ const TABS: { id: AlumnoTab; label: string; icon: React.ElementType }[] = [
   { id: "tutores", label: "Tutores", icon: HeartHandshake },
   { id: "observaciones", label: "Observaciones", icon: MessageSquare },
 ];
+
+/* ═════════════════════ UTILIDADES ═════════════════════ */
+
+function formatDate(dateStr: string | undefined): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" });
+}
 
 /* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
 
@@ -74,13 +131,51 @@ export default function AlumnosSection() {
   );
 }
 
-/* ═════════════════════ REGISTRO ═════════════════════ */
+/* ═════════════════════ REGISTRO (CRUD SUPABASE) ═════════════════════ */
 
 function RegistroView() {
-  const [alumnos, setAlumnos] = useStoreItem(store.alumnos);
+  const [alumnos, setAlumnos] = useState<Alumno[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [grupoFilter, setGrupoFilter] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  const loadAlumnos = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) { setLoading(false); return; }
+      setUserId(uid);
+
+      const { data, error } = await supabase
+        .from("alumnos")
+        .select("*")
+        .eq("user_id", uid)
+        .order("creado_en", { ascending: false });
+
+      if (error) {
+        console.error("[Alumnos] Error cargando:", error);
+        if (error.code === "42P01") {
+          toast.error("La tabla de alumnos no existe. Ejecuta el SQL de configuración en Supabase.");
+        } else {
+          toast.error("Error al cargar alumnos: " + error.message);
+        }
+      } else {
+        // Cast explícito para resolver TS 2345
+        setAlumnos((data as Alumno[]) || []);
+      }
+    } catch (err) {
+      console.error("[Alumnos] Error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAlumnos();
+  }, [loadAlumnos]);
 
   const filtered = alumnos.filter((a) => {
     const matchSearch = a.nombre.toLowerCase().includes(search.toLowerCase());
@@ -88,20 +183,41 @@ function RegistroView() {
     return matchSearch && matchGrupo;
   });
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar este alumno? También se eliminarán sus tutores y observaciones.")) return;
-    setAlumnos((prev) => prev.filter((a) => a.id !== id));
-    const tutores = store.tutores.get().filter((t) => t.alumno_id !== id);
-    store.tutores.set(tutores);
-    const observs = store.observaciones.get().filter((o) => o.alumno_id !== id);
-    store.observaciones.set(observs);
-    toast.success("Alumno eliminado.");
+    try {
+      await supabase.from("tutores").delete().eq("alumno_id", id);
+      await supabase.from("observaciones").delete().eq("alumno_id", id);
+      const { error } = await supabase.from("alumnos").delete().eq("id", id);
+      if (error) throw error;
+      setAlumnos((prev) => prev.filter((a) => a.id !== id));
+      toast.success("Alumno eliminado correctamente.");
+    } catch (err: any) {
+      toast.error("Error al eliminar: " + err.message);
+    }
   };
 
-  const toggleActivo = (id: string) => {
-    setAlumnos((prev) => prev.map((a) => (a.id === id ? { ...a, activo: !a.activo } : a)));
-    toast.success("Estado actualizado.");
+  const toggleActivo = async (id: string, current: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("alumnos")
+        .update({ activo: !current })
+        .eq("id", id);
+      if (error) throw error;
+      setAlumnos((prev) => prev.map((a) => (a.id === id ? { ...a, activo: !current } : a)));
+      toast.success(`Alumno ${!current ? "activado" : "desactivado"}.`);
+    } catch (err: any) {
+      toast.error("Error: " + err.message);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -134,6 +250,7 @@ function RegistroView() {
           <div className="text-center py-12 text-muted-foreground">
             <Users className="w-10 h-10 mx-auto mb-2 opacity-50" />
             <p>No hay alumnos registrados.</p>
+            <p className="text-xs mt-1">Haz clic en "Nuevo Alumno" para comenzar.</p>
           </div>
         )}
         {filtered.map((a, i) => (
@@ -150,11 +267,11 @@ function RegistroView() {
                   <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300">{a.nombre[0]}</span>
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="text-sm font-semibold">{a.nombre}</h4>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-sm font-semibold">{a.nombre} {a.apellidos}</h4>
                     <Badge
                       className={`text-xs cursor-pointer ${a.activo ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
-                      onClick={() => toggleActivo(a.id)}
+                      onClick={() => toggleActivo(a.id, a.activo)}
                     >
                       {a.activo ? "Activo" : "Inactivo"}
                     </Badge>
@@ -176,48 +293,81 @@ function RegistroView() {
       </div>
 
       <AnimatePresence>
-        {showModal && <NuevoAlumnoModal onClose={() => setShowModal(false)} />}
+        {showModal && <NuevoAlumnoModal onClose={() => { setShowModal(false); loadAlumnos(); }} userId={userId} />}
       </AnimatePresence>
     </div>
   );
 }
 
-function NuevoAlumnoModal({ onClose }: { onClose: () => void }) {
+function NuevoAlumnoModal({ onClose, userId }: { onClose: () => void; userId: string | null }) {
   const [nombre, setNombre] = useState("");
+  const [apellidos, setApellidos] = useState("");
   const [grupo, setGrupo] = useState(GRUPOS[0]);
+  const [grado, setGrado] = useState("1°");
   const [saving, setSaving] = useState(false);
-  const [, setAlumnos] = useStoreItem(store.alumnos);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!nombre.trim()) { toast.error("El nombre es obligatorio."); return; }
+    if (!userId) { toast.error("Debes iniciar sesión."); return; }
+
     setSaving(true);
-    const nuevo: Alumno = {
-      id: `al-${Date.now()}`,
-      nombre: nombre.trim(),
-      grupo,
-      activo: true,
-      creado_en: new Date().toISOString().split("T")[0],
-    };
-    setAlumnos((prev) => [nuevo, ...prev]);
-    setTimeout(() => {
+    try {
+      const { data, error } = await supabase
+        .from("alumnos")
+        .insert({
+          user_id: userId,
+          nombre: nombre.trim(),
+          apellidos: apellidos.trim() || null,
+          grupo,
+          grado,
+          activo: true,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        if (error.code === "42P01") {
+          toast.error("❌ La tabla 'alumnos' no existe. Ejecuta el SQL de configuración.");
+        } else {
+          throw error;
+        }
+      } else {
+        toast.success("Alumno registrado correctamente.");
+        onClose();
+      }
+    } catch (err: any) {
+      toast.error("Error: " + err.message);
+    } finally {
       setSaving(false);
-      toast.success("Alumno registrado correctamente.");
-      onClose();
-    }, 400);
+    }
   };
 
   return (
     <ModalWrapper title="Nuevo Alumno" icon={UserCircle} onClose={onClose}>
       <div className="space-y-4">
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nombre completo *</label>
-          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Fernando Garcia Robles" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nombre *</label>
+            <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Fernando" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Apellidos</label>
+            <input value={apellidos} onChange={(e) => setApellidos(e.target.value)} placeholder="Ej: Garcia Robles" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+          </div>
         </div>
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grupo</label>
-          <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-            {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
-          </select>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grupo</label>
+            <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
+              {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grado</label>
+            <select value={grado} onChange={(e) => setGrado(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
+              {["1°", "2°", "3°", "4°", "5°", "6°"].map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
         </div>
         <div className="flex gap-3 pt-2">
           <Button variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -234,40 +384,62 @@ function NuevoAlumnoModal({ onClose }: { onClose: () => void }) {
 /* ═════════════════════ HISTORIAL ═════════════════════ */
 
 function HistorialView() {
-  const [alumnos] = useStoreItem(store.alumnos);
+  const [alumnos, setAlumnos] = useState<Alumno[]>([]);
+  const [tutores, setTutores] = useState<Tutor[]>([]);
+  const [observaciones, setObservaciones] = useState<Observacion[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedAlumno, setSelectedAlumno] = useState("");
   const [search, setSearch] = useState("");
 
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) { setLoading(false); return; }
+
+      const [{ data: alData }, { data: tuData }, { data: obData }] = await Promise.all([
+        supabase.from("alumnos").select("*").eq("user_id", uid),
+        supabase.from("tutores").select("*").eq("user_id", uid),
+        supabase.from("observaciones").select("*").eq("user_id", uid).order("fecha", { ascending: false }),
+      ]);
+
+      setAlumnos((alData as Alumno[]) || []);
+      setTutores((tuData as Tutor[]) || []);
+      setObservaciones((obData as Observacion[]) || []);
+    } catch (err) {
+      console.error("[Historial] Error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
   const filtered = alumnos.filter((a) => a.nombre.toLowerCase().includes(search.toLowerCase()));
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Buscar alumno para ver historial..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary transition-colors"
-          />
+          <input type="text" placeholder="Buscar alumno..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
         </div>
       </div>
       {!selectedAlumno ? (
         <div className="space-y-2">
           {filtered.map((a) => (
-            <button
-              key={a.id}
-              onClick={() => setSelectedAlumno(a.id)}
-              className="w-full text-left bg-card rounded-xl p-4 border border-border shadow-sm hover:shadow-md transition-all"
-            >
+            <button key={a.id} onClick={() => setSelectedAlumno(a.id)} className="w-full text-left bg-card rounded-xl p-4 border border-border shadow-sm hover:shadow-md transition-all">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-100 to-blue-100 dark:from-cyan-900 dark:to-blue-900 flex items-center justify-center shrink-0">
-                  <span className="text-sm font-bold text-cyan-700 dark:text-cyan-300">{a.nombre[0]}</span>
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-100 to-blue-100 flex items-center justify-center shrink-0">
+                  <span className="text-sm font-bold text-cyan-700">{a.nombre[0]}</span>
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold">{a.nombre}</h4>
+                  <h4 className="text-sm font-semibold">{a.nombre} {a.apellidos}</h4>
                   <p className="text-xs text-muted-foreground">{a.grupo} · Ver historial completo</p>
                 </div>
                 <History className="w-4 h-4 text-muted-foreground ml-auto" />
@@ -276,24 +448,26 @@ function HistorialView() {
           ))}
         </div>
       ) : (
-        <AlumnoHistorial alumnoId={selectedAlumno} onBack={() => setSelectedAlumno("")} />
+        <AlumnoHistorial
+          alumnoId={selectedAlumno}
+          onBack={() => setSelectedAlumno("")}
+          alumnos={alumnos}
+          tutores={tutores}
+          observaciones={observaciones}
+        />
       )}
     </div>
   );
 }
 
-function AlumnoHistorial({ alumnoId, onBack }: { alumnoId: string; onBack: () => void }) {
-  const [alumnos] = useStoreItem(store.alumnos);
-  const [tutores] = useStoreItem(store.tutores);
-  const [observaciones] = useStoreItem(store.observaciones);
+function AlumnoHistorial({ alumnoId, onBack, alumnos, tutores, observaciones }: {
+  alumnoId: string; onBack: () => void; alumnos: Alumno[]; tutores: Tutor[]; observaciones: Observacion[];
+}) {
   const alumno = alumnos.find((a) => a.id === alumnoId);
-
   if (!alumno) return null;
 
   const misTutores = tutores.filter((t) => t.alumno_id === alumnoId);
-  const misObs = observaciones
-    .filter((o) => o.alumno_id === alumnoId)
-    .sort((a, b) => +new Date(b.fecha) - +new Date(a.fecha));
+  const misObs = observaciones.filter((o) => o.alumno_id === alumnoId);
 
   return (
     <div className="space-y-4">
@@ -301,7 +475,7 @@ function AlumnoHistorial({ alumnoId, onBack }: { alumnoId: string; onBack: () =>
         <ChevronDown className="w-4 h-4 rotate-90" /> Volver a la lista
       </button>
       <div className="bg-gradient-to-r from-cyan-500 to-blue-600 rounded-2xl p-5 text-white">
-        <h3 className="font-bold text-lg">{alumno.nombre}</h3>
+        <h3 className="font-bold text-lg">{alumno.nombre} {alumno.apellidos}</h3>
         <p className="text-white/80 text-sm">{alumno.grupo} · {alumno.activo ? "Activo" : "Inactivo"}</p>
       </div>
 
@@ -342,39 +516,67 @@ function AlumnoHistorial({ alumnoId, onBack }: { alumnoId: string; onBack: () =>
   );
 }
 
-/* ═════════════════════ TUTORES ═════════════════════ */
+/* ═════════════════════ TUTORES (CRUD SUPABASE) ═════════════════════ */
 
 function TutoresView() {
-  const [tutores, setTutores] = useStoreItem(store.tutores);
-  const [alumnos] = useStoreItem(store.alumnos);
+  const [tutores, setTutores] = useState<Tutor[]>([]);
+  const [alumnos, setAlumnos] = useState<Alumno[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) { setLoading(false); return; }
+      setUserId(uid);
+
+      const [{ data: tuData }, { data: alData }] = await Promise.all([
+        supabase.from("tutores").select("*").eq("user_id", uid).order("creado_en", { ascending: false }),
+        supabase.from("alumnos").select("id, nombre, grupo, activo").eq("user_id", uid).eq("activo", true),
+      ]);
+
+      setTutores((tuData as Tutor[]) || []);
+      setAlumnos((alData as Alumno[]) || []);
+    } catch (err) {
+      console.error("[Tutores] Error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const filtered = tutores.filter((t) =>
     t.nombre.toLowerCase().includes(search.toLowerCase()) ||
     t.alumno_nombre.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar este tutor?")) return;
-    setTutores((prev) => prev.filter((t) => t.id !== id));
-    const padres = store.padres.get().filter((p) => p.id !== id);
-    store.padres.set(padres);
-    toast.success("Tutor eliminado.");
+    try {
+      const { error } = await supabase.from("tutores").delete().eq("id", id);
+      if (error) throw error;
+      setTutores((prev) => prev.filter((t) => t.id !== id));
+      toast.success("Tutor eliminado.");
+    } catch (err: any) {
+      toast.error("Error: " + err.message);
+    }
   };
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Buscar tutor o alumno..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary transition-colors"
-          />
+          <input type="text" placeholder="Buscar tutor o alumno..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
           <Plus className="w-4 h-4" /> Nuevo Tutor
@@ -391,11 +593,7 @@ function TutoresView() {
 
       <div className="space-y-2">
         {filtered.map((t, i) => (
-          <motion.div
-            key={t.id}
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.03 }}
+          <motion.div key={t.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
             className="bg-card rounded-xl p-4 border border-border shadow-sm hover:shadow-md transition-shadow"
           >
             <div className="flex items-start justify-between gap-3">
@@ -403,18 +601,14 @@ function TutoresView() {
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <h4 className="text-sm font-semibold">{t.nombre}</h4>
                   <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{t.parentesco}</span>
-                  <span className="text-xs text-cyan-600 bg-cyan-50 dark:bg-cyan-950 px-2 py-0.5 rounded-full">{t.alumno_nombre}</span>
+                  <span className="text-xs text-cyan-600 bg-cyan-50 px-2 py-0.5 rounded-full">{t.alumno_nombre}</span>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap text-xs">
                   {t.telefono && <span className="text-green-600 flex items-center gap-1"><Phone className="w-3 h-3" />{t.telefono}</span>}
                   {t.email && <span className="text-blue-600 flex items-center gap-1"><Mail className="w-3 h-3" />{t.email}</span>}
                 </div>
               </div>
-              <button
-                onClick={() => handleDelete(t.id)}
-                className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors"
-                title="Eliminar"
-              >
+              <button onClick={() => handleDelete(t.id)} className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors" title="Eliminar">
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
@@ -423,46 +617,53 @@ function TutoresView() {
       </div>
 
       <AnimatePresence>
-        {showModal && <NuevoTutorModal onClose={() => setShowModal(false)} alumnos={alumnos} />}
+        {showModal && <NuevoTutorModal onClose={() => { setShowModal(false); loadData(); }} alumnos={alumnos} userId={userId} />}
       </AnimatePresence>
     </div>
   );
 }
 
-function NuevoTutorModal({ onClose, alumnos }: { onClose: () => void; alumnos: Alumno[] }) {
+function NuevoTutorModal({ onClose, alumnos, userId }: { onClose: () => void; alumnos: Alumno[]; userId: string | null }) {
   const [alumnoId, setAlumnoId] = useState(alumnos[0]?.id || "");
   const [nombre, setNombre] = useState("");
   const [parentesco, setParentesco] = useState("Madre");
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
-  const [, setTutores] = useStoreItem(store.tutores);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!alumnoId || !nombre.trim()) { toast.error("Alumno y nombre del tutor son obligatorios."); return; }
+    if (!userId) { toast.error("Debes iniciar sesión."); return; }
     const alumno = alumnos.find((a) => a.id === alumnoId);
     if (!alumno) { toast.error("Alumno no válido."); return; }
 
     setSaving(true);
-    const nuevo: Tutor = {
-      id: `t-${Date.now()}`,
-      alumno_id: alumnoId,
-      alumno_nombre: alumno.nombre,
-      nombre: nombre.trim(),
-      parentesco: parentesco.trim() || "Tutor",
-      telefono: telefono.trim(),
-      email: email.trim(),
-      creado_en: new Date().toISOString(),
-    };
+    try {
+      const { error } = await supabase.from("tutores").insert({
+        user_id: userId,
+        alumno_id: alumnoId,
+        alumno_nombre: alumno.nombre,
+        nombre: nombre.trim(),
+        parentesco: parentesco.trim() || "Tutor",
+        telefono: telefono.trim() || null,
+        email: email.trim() || null,
+      });
 
-    setTutores((prev) => [nuevo, ...prev]);
-    syncTutorToPadres(nuevo);
-
-    setTimeout(() => {
+      if (error) {
+        if (error.code === "42P01") {
+          toast.error("❌ La tabla 'tutores' no existe. Ejecuta el SQL de configuración.");
+        } else {
+          throw error;
+        }
+      } else {
+        toast.success("Tutor guardado correctamente.");
+        onClose();
+      }
+    } catch (err: any) {
+      toast.error("Error: " + err.message);
+    } finally {
       setSaving(false);
-      toast.success("Tutor guardado y sincronizado con Padres de Familia.");
-      onClose();
-    }, 400);
+    }
   };
 
   return (
@@ -471,7 +672,7 @@ function NuevoTutorModal({ onClose, alumnos }: { onClose: () => void; alumnos: A
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Alumno *</label>
           <select value={alumnoId} onChange={(e) => setAlumnoId(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-            {alumnos.filter((a) => a.activo).map((a) => <option key={a.id} value={a.id}>{a.nombre} ({a.grupo})</option>)}
+            {alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre} ({a.grupo})</option>)}
           </select>
         </div>
         <div>
@@ -504,37 +705,67 @@ function NuevoTutorModal({ onClose, alumnos }: { onClose: () => void; alumnos: A
   );
 }
 
-/* ═════════════════════ OBSERVACIONES ═════════════════════ */
+/* ═════════════════════ OBSERVACIONES (CRUD SUPABASE) ═════════════════════ */
 
 function ObservacionesView() {
-  const [observaciones, setObservaciones] = useStoreItem(store.observaciones);
-  const [alumnos] = useStoreItem(store.alumnos);
+  const [observaciones, setObservaciones] = useState<Observacion[]>([]);
+  const [alumnos, setAlumnos] = useState<Alumno[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) { setLoading(false); return; }
+      setUserId(uid);
+
+      const [{ data: obData }, { data: alData }] = await Promise.all([
+        supabase.from("observaciones").select("*").eq("user_id", uid).order("fecha", { ascending: false }),
+        supabase.from("alumnos").select("id, nombre, activo").eq("user_id", uid).eq("activo", true),
+      ]);
+
+      setObservaciones((obData as Observacion[]) || []);
+      setAlumnos((alData as Alumno[]) || []);
+    } catch (err) {
+      console.error("[Observaciones] Error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const filtered = observaciones.filter((o) =>
     o.alumno_nombre.toLowerCase().includes(search.toLowerCase()) ||
     o.descripcion.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar esta observación?")) return;
-    setObservaciones((prev) => prev.filter((o) => o.id !== id));
-    toast.success("Observación eliminada.");
+    try {
+      const { error } = await supabase.from("observaciones").delete().eq("id", id);
+      if (error) throw error;
+      setObservaciones((prev) => prev.filter((o) => o.id !== id));
+      toast.success("Observación eliminada.");
+    } catch (err: any) {
+      toast.error("Error: " + err.message);
+    }
   };
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Buscar observación..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary transition-colors"
-          />
+          <input type="text" placeholder="Buscar observación..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
           <Plus className="w-4 h-4" /> Nueva Observación
@@ -550,11 +781,7 @@ function ObservacionesView() {
 
       <div className="space-y-2">
         {filtered.map((o, i) => (
-          <motion.div
-            key={o.id}
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.03 }}
+          <motion.div key={o.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
             className="bg-card rounded-xl p-4 border border-border shadow-sm hover:shadow-md transition-shadow"
           >
             <div className="flex items-start justify-between gap-3">
@@ -566,11 +793,7 @@ function ObservacionesView() {
                 </div>
                 <p className="text-sm text-foreground">{o.descripcion}</p>
               </div>
-              <button
-                onClick={() => handleDelete(o.id)}
-                className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors"
-                title="Eliminar"
-              >
+              <button onClick={() => handleDelete(o.id)} className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors" title="Eliminar">
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
@@ -579,41 +802,51 @@ function ObservacionesView() {
       </div>
 
       <AnimatePresence>
-        {showModal && <NuevaObservacionModal onClose={() => setShowModal(false)} alumnos={alumnos} />}
+        {showModal && <NuevaObservacionModal onClose={() => { setShowModal(false); loadData(); }} alumnos={alumnos} userId={userId} />}
       </AnimatePresence>
     </div>
   );
 }
 
-function NuevaObservacionModal({ onClose, alumnos }: { onClose: () => void; alumnos: Alumno[] }) {
+function NuevaObservacionModal({ onClose, alumnos, userId }: { onClose: () => void; alumnos: Alumno[]; userId: string | null }) {
   const [alumnoId, setAlumnoId] = useState(alumnos[0]?.id || "");
   const [tipo, setTipo] = useState<"positiva" | "negativa" | "neutra">("neutra");
   const [fecha, setFecha] = useState(new Date().toISOString().split("T")[0]);
   const [descripcion, setDescripcion] = useState("");
   const [saving, setSaving] = useState(false);
-  const [, setObservaciones] = useStoreItem(store.observaciones);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!alumnoId || !descripcion.trim()) { toast.error("Alumno y descripción son obligatorios."); return; }
+    if (!userId) { toast.error("Debes iniciar sesión."); return; }
     const alumno = alumnos.find((a) => a.id === alumnoId);
     if (!alumno) return;
 
     setSaving(true);
-    const nueva: Observacion = {
-      id: `obs-${Date.now()}`,
-      alumno_id: alumnoId,
-      alumno_nombre: alumno.nombre,
-      fecha,
-      tipo,
-      descripcion: descripcion.trim(),
-      creado_en: new Date().toISOString(),
-    };
-    setObservaciones((prev) => [nueva, ...prev]);
-    setTimeout(() => {
+    try {
+      const { error } = await supabase.from("observaciones").insert({
+        user_id: userId,
+        alumno_id: alumnoId,
+        alumno_nombre: alumno.nombre,
+        fecha,
+        tipo,
+        descripcion: descripcion.trim(),
+      });
+
+      if (error) {
+        if (error.code === "42P01") {
+          toast.error("❌ La tabla 'observaciones' no existe. Ejecuta el SQL de configuración.");
+        } else {
+          throw error;
+        }
+      } else {
+        toast.success("Observación guardada correctamente.");
+        onClose();
+      }
+    } catch (err: any) {
+      toast.error("Error: " + err.message);
+    } finally {
       setSaving(false);
-      toast.success("Observación guardada correctamente.");
-      onClose();
-    }, 400);
+    }
   };
 
   return (
@@ -622,7 +855,7 @@ function NuevaObservacionModal({ onClose, alumnos }: { onClose: () => void; alum
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Alumno *</label>
           <select value={alumnoId} onChange={(e) => setAlumnoId(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-            {alumnos.filter((a) => a.activo).map((a) => <option key={a.id} value={a.id}>{a.nombre} ({a.grupo})</option>)}
+            {alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
           </select>
         </div>
         <div className="grid grid-cols-2 gap-3">

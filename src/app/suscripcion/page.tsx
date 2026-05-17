@@ -1,20 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { useRouter, useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  Check,
-  Loader2,
-  Sparkles,
-  Zap,
-  Building2,
-  ArrowRight,
-  Crown,
-  AlertTriangle,
-  LogIn,
-  RefreshCw,
-  AlertCircle,
+  Check, Loader2, Sparkles, Zap, Building2, ArrowRight, Crown,
+  AlertTriangle, LogIn, RefreshCw, AlertCircle, Shield, Info,
+  ChevronRight, Clock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -47,11 +39,9 @@ type LoadingState = "idle" | "loading" | "error" | "ready";
 type CheckoutState = "idle" | "redirecting" | "error";
 
 function formatPrice(cents: number | null, pesos: number | null): string {
-  // Prioridad 1: centavos (nueva estructura)
   if (cents && cents > 0) {
     return `$${(cents / 100).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
   }
-  // Prioridad 2: pesos (estructura antigua)
   if (pesos && pesos > 0) {
     return `$${pesos.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
   }
@@ -60,6 +50,9 @@ function formatPrice(cents: number | null, pesos: number | null): string {
 
 export default function SuscripcionPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const canceled = searchParams.get("canceled") === "true";
+
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [loadState, setLoadState] = useState<LoadingState>("idle");
   const [checkoutState, setCheckoutState] = useState<CheckoutState>("idle");
@@ -67,6 +60,7 @@ export default function SuscripcionPage() {
   const [currentSubscription, setCurrentSubscription] = useState<CurrentSubscription | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [stripeConfigured, setStripeConfigured] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoadState("loading");
@@ -92,6 +86,12 @@ export default function SuscripcionPage() {
         dias_prueba: p.dias_prueba ?? 15,
       }));
 
+      // Verificar si Stripe está configurado (algún plan tiene price_id válido)
+      const hasStripeIds = normalizedPlans.some(
+        (p) => p.stripe_price_id && p.stripe_price_id.startsWith("price_")
+      );
+      setStripeConfigured(hasStripeIds);
+
       setPlans(normalizedPlans);
 
       if (uid) {
@@ -115,7 +115,10 @@ export default function SuscripcionPage() {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    if (canceled) {
+      toast.info("El pago fue cancelado. Puedes intentarlo de nuevo cuando quieras.", { duration: 5000 });
+    }
+  }, [loadData, canceled]);
 
   const handleSubscribe = useCallback(async (plan: SubscriptionPlan, billing: "monthly" | "annual" = "monthly") => {
     setCheckoutState("redirecting");
@@ -136,8 +139,15 @@ export default function SuscripcionPage() {
         ? (plan.stripe_price_id_anual || plan.stripe_price_id)
         : plan.stripe_price_id;
 
-      if (!priceId) {
-        throw new Error("Este plan no tiene configurado un precio de Stripe. Contacta soporte.");
+      // ─── VALIDACIÓN FRONTEND: ¿Stripe configurado? ───
+      if (!priceId || !priceId.startsWith("price_")) {
+        setCheckoutState("error");
+        setActivePlanId(null);
+        toast.error(
+          `⚠️ El plan "${plan.nombre}" no tiene un precio de Stripe configurado. Contacta al administrador.`,
+          { duration: 6000 }
+        );
+        return;
       }
 
       const res = await fetch("/next_api/stripe/checkout", {
@@ -153,11 +163,26 @@ export default function SuscripcionPage() {
 
       const json = await res.json();
 
-      if (!res.ok || !json.url) {
-        throw new Error(json.error || "Error al iniciar el pago");
+      if (!res.ok) {
+        setCheckoutState("error");
+        setActivePlanId(null);
+
+        if (json.code === "STRIPE_RESOURCE_MISSING") {
+          toast.error(`❌ ${json.error}. ${json.detail || ""}`, { duration: 8000 });
+        } else if (json.code === "INVALID_PRICE_ID") {
+          toast.error(`❌ ${json.error}. ${json.detail || ""}`, { duration: 8000 });
+        } else {
+          toast.error(json.error || "Error al iniciar el pago");
+        }
+        return;
       }
 
-      window.location.href = json.url;
+      if (json.url) {
+        toast.success("Redirigiendo a Stripe para pago seguro... 🔒");
+        window.location.href = json.url;
+      } else {
+        throw new Error("No se recibió URL de checkout");
+      }
     } catch (err) {
       console.error("[SuscripcionPage] Checkout error:", err);
       setErrorMsg(err instanceof Error ? err.message : "Error al iniciar el pago");
@@ -219,6 +244,41 @@ export default function SuscripcionPage() {
           </motion.div>
         </div>
 
+        {/* ALERTA: STRIPE NO CONFIGURADO */}
+        {!stripeConfigured && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-3xl mx-auto"
+          >
+            <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/30">
+              <CardContent className="p-5">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-amber-800 dark:text-amber-300 text-sm">
+                      ⚠️ Pagos temporalmente deshabilitados
+                    </h3>
+                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                      Los planes muestran precios correctamente, pero aún no están conectados con Stripe.
+                      Los botones de pago están deshabilitados hasta que el administrador configure los price_id.
+                    </p>
+                    <div className="mt-3 bg-white/60 dark:bg-black/20 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                      <p className="font-medium">Para activar pagos:</p>
+                      <ol className="list-decimal list-inside space-y-0.5 ml-1">
+                        <li>Ve a <a href="https://dashboard.stripe.com/products" target="_blank" rel="noopener noreferrer" className="underline font-semibold">Stripe Dashboard → Products</a></li>
+                        <li>Crea 3 productos (Básico $99, Profesional $199, Institucional $499)</li>
+                        <li>Copia los <code>price_...</code> IDs a la tabla <code>subscription_plans</code> en Supabase</li>
+                        <li>Verifica que <code>STRIPE_SECRET_KEY</code> esté en Vercel</li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
         {/* Banner login requerido */}
         {!userId && (
           <motion.div
@@ -227,7 +287,7 @@ export default function SuscripcionPage() {
             className="max-w-2xl mx-auto"
           >
             <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/30">
-              <CardContent className="py-4 flex items-center gap-3 justify-center">
+              <CardContent className="py-4 flex items-center gap-3 justify-center flex-wrap">
                 <LogIn className="w-5 h-5 text-blue-600" />
                 <p className="text-sm text-blue-800 dark:text-blue-300">
                   <span className="font-semibold">Inicia sesión</span> para suscribirte y comenzar tu prueba gratuita.
@@ -248,7 +308,7 @@ export default function SuscripcionPage() {
             className="max-w-2xl mx-auto"
           >
             <Card className="border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/30">
-              <CardContent className="py-4 flex items-center gap-3 justify-center">
+              <CardContent className="py-4 flex items-center gap-3 justify-center flex-wrap">
                 <Check className="w-5 h-5 text-green-600" />
                 <p className="text-sm text-green-800 dark:text-green-300">
                   Ya tienes una suscripción{" "}
@@ -287,13 +347,13 @@ export default function SuscripcionPage() {
             const isInstitutional = plan.nombre.toLowerCase().includes("institucional");
             const isCurrent = currentSubscription?.plan_id === plan.id;
 
-            // Calcular precios para mostrar
             const monthlyPrice = plan.precio_centavos ?? plan.precio_mensual ?? 0;
             const annualPrice = plan.precio_centavos_anual ?? plan.precio_anual ?? 0;
             const hasRealPrice = monthlyPrice > 0;
-            const hasStripePrice = !!plan.stripe_price_id;
+            const hasStripePrice = !!plan.stripe_price_id && plan.stripe_price_id.startsWith("price_");
             const canSubscribe = hasStripePrice && !!userId;
             const isFreePlan = !hasRealPrice && !hasStripePrice;
+            const isProcessing = checkoutState === "redirecting" && activePlanId === plan.id;
 
             return (
               <motion.div
@@ -357,8 +417,9 @@ export default function SuscripcionPage() {
                         </p>
                       )}
                       {plan.dias_prueba && plan.dias_prueba > 0 && hasRealPrice && (
-                        <p className="text-xs text-green-600 font-medium mt-1">
-                          🎁 {plan.dias_prueba} días de prueba gratis
+                        <p className="text-xs text-green-600 font-medium mt-1 flex items-center justify-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {plan.dias_prueba} días de prueba gratis
                         </p>
                       )}
                     </div>
@@ -392,10 +453,12 @@ export default function SuscripcionPage() {
                         <>
                           <Button
                             onClick={() => handleSubscribe(plan, "monthly")}
-                            disabled={checkoutState === "redirecting" && activePlanId === plan.id}
-                            className={`w-full gap-2 ${isPopular ? "bg-primary hover:bg-primary/90" : ""}`}
+                            disabled={isProcessing || !canSubscribe}
+                            className={`w-full gap-2 ${
+                              isPopular ? "bg-primary hover:bg-primary/90" : ""
+                            } ${!canSubscribe ? "bg-slate-200 text-slate-500 cursor-not-allowed hover:bg-slate-200" : ""}`}
                           >
-                            {checkoutState === "redirecting" && activePlanId === plan.id ? (
+                            {isProcessing ? (
                               <>
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 Redirigiendo...
@@ -405,7 +468,10 @@ export default function SuscripcionPage() {
                             ) : isFreePlan ? (
                               "Activar gratis"
                             ) : !hasStripePrice ? (
-                              "No disponible"
+                              <>
+                                <AlertCircle className="w-4 h-4" />
+                                Configuración pendiente
+                              </>
                             ) : (
                               <>
                                 Elegir Plan
@@ -417,7 +483,7 @@ export default function SuscripcionPage() {
                           {annualPrice > 0 && hasStripePrice && (
                             <Button
                               onClick={() => handleSubscribe(plan, "annual")}
-                              disabled={checkoutState === "redirecting" && activePlanId === plan.id}
+                              disabled={isProcessing || !canSubscribe}
                               variant="outline"
                               className="w-full gap-2 text-xs"
                             >
@@ -430,8 +496,15 @@ export default function SuscripcionPage() {
                       {/* Mensajes informativos debajo del botón */}
                       {!hasStripePrice && userId && !isFreePlan && (
                         <p className="text-xs text-center text-amber-600 flex items-center justify-center gap-1">
-                          <AlertCircle className="w-3 h-3" />
+                          <Info className="w-3 h-3" />
                           Plan pendiente de configuración de pago.
+                        </p>
+                      )}
+
+                      {canSubscribe && (
+                        <p className="text-[10px] text-center text-slate-400 flex items-center justify-center gap-1">
+                          <Shield className="w-3 h-3" />
+                          Pago seguro por Stripe · Cancela cuando quieras
                         </p>
                       )}
                     </div>

@@ -1,23 +1,65 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Calendar, Plus, Search, Trash2, Check, X, Loader2, ClipboardCheck,
-  FileText, BarChart3, UserCheck, UserX, Clock, Filter,
-  ChevronDown, Save
+  FileText, BarChart3, UserCheck, UserX, Clock, Save,
+  ChevronDown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import {
-  store, useStoreItem, GRUPOS, formatDate,
-  type Alumno, type Justificacion, type RegistroAsistencia,
-} from "./planeadocente-store";
+import { supabase } from "@/integrations/supabase/client";
 
-/* ═════════════════════ TIPOS LOCALES ═════════════════════ */
+/* ═════════════════════ TIPOS ═════════════════════ */
+
+type EstadoAsistencia = "presente" | "ausente" | "retardo" | "justificado";
+
+interface RegistroIndividual {
+  alumno_id: string;
+  alumno_nombre: string;
+  estado: EstadoAsistencia;
+  nota?: string;
+}
+
+interface AsistenciaDia {
+  id: string;
+  user_id: string;
+  fecha: string;
+  grupo: string;
+  registros: RegistroIndividual[];
+  creado_en: string;
+}
+
+interface Justificacion {
+  id: string;
+  user_id: string;
+  alumno_id: string;
+  alumno_nombre: string;
+  desde: string;
+  hasta: string;
+  motivo: string;
+  creado_en: string;
+}
+
+interface AlumnoMini {
+  id: string;
+  nombre: string;
+  grupo: string;
+  activo: boolean;
+}
 
 type AsistenciaTab = "registro" | "justificaciones" | "reportes";
+
+const GRUPOS = [
+  "1° A", "1° B", "1° C", "1° D",
+  "2° A", "2° B", "2° C", "2° D",
+  "3° A", "3° B", "3° C", "3° D",
+  "4° A", "4° B", "4° C", "4° D",
+  "5° A", "5° B", "5° C", "5° D",
+  "6° A", "6° B", "6° C", "6° D",
+];
 
 const TABS: { id: AsistenciaTab; label: string; icon: React.ElementType }[] = [
   { id: "registro", label: "Registro Diario", icon: ClipboardCheck },
@@ -25,12 +67,19 @@ const TABS: { id: AsistenciaTab; label: string; icon: React.ElementType }[] = [
   { id: "reportes", label: "Reportes", icon: BarChart3 },
 ];
 
-const ESTADOS = {
+const ESTADOS: Record<EstadoAsistencia, { label: string; className: string; icon: React.ElementType }> = {
   presente: { label: "Presente", className: "bg-emerald-100 text-emerald-700 border-emerald-200", icon: UserCheck },
   ausente: { label: "Ausente", className: "bg-red-100 text-red-700 border-red-200", icon: UserX },
   retardo: { label: "Retardo", className: "bg-amber-100 text-amber-700 border-amber-200", icon: Clock },
   justificado: { label: "Justificado", className: "bg-blue-100 text-blue-700 border-blue-200", icon: FileText },
 };
+
+function formatDate(dateStr: string | undefined): string {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" });
+}
 
 /* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
 
@@ -79,32 +128,58 @@ export default function AsistenciaSection() {
   );
 }
 
-/* ═════════════════════ REGISTRO DIARIO ═════════════════════ */
+/* ═════════════════════ REGISTRO DIARIO (SUPABASE) ═════════════════════ */
 
 function RegistroDiarioView() {
-  const [alumnos] = useStoreItem(store.alumnos);
-  const [asistencias, setAsistencias] = useStoreItem(store.asistencia);
+  const [alumnos, setAlumnos] = useState<AlumnoMini[]>([]);
+  const [asistencias, setAsistencias] = useState<AsistenciaDia[]>([]);
+  const [loading, setLoading] = useState(true);
   const [fecha, setFecha] = useState(new Date().toISOString().split("T")[0]);
   const [grupo, setGrupo] = useState(GRUPOS[0]);
   const [saving, setSaving] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
-  const alumnosGrupo = useMemo(() => alumnos.filter((a) => a.grupo === grupo && a.activo), [alumnos, grupo]);
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) { setLoading(false); return; }
+      setUserId(uid);
+
+      const [{ data: alData }, { data: asData }] = await Promise.all([
+        supabase.from("alumnos").select("id, nombre, grupo, activo").eq("user_id", uid).eq("activo", true),
+        supabase.from("asistencia").select("*").eq("user_id", uid).order("fecha", { ascending: false }),
+      ]);
+
+      setAlumnos((alData as AlumnoMini[]) || []);
+      setAsistencias((asData as AsistenciaDia[]) || []);
+    } catch (err) {
+      console.error("[Asistencia] Error cargando:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const alumnosGrupo = useMemo(() => alumnos.filter((a) => a.grupo === grupo), [alumnos, grupo]);
 
   const registroExistente = useMemo(() => {
     return asistencias.find((a) => a.fecha === fecha && a.grupo === grupo);
   }, [asistencias, fecha, grupo]);
 
-  const [registros, setRegistros] = useState<RegistroAsistencia["registros"]>([]);
+  const [registros, setRegistros] = useState<RegistroIndividual[]>([]);
 
   useEffect(() => {
     if (registroExistente) {
-      setRegistros(registroExistente.registros);
+      setRegistros(registroExistente.registros || []);
     } else {
       setRegistros(
         alumnosGrupo.map((a) => ({
           alumno_id: a.id,
           alumno_nombre: a.nombre,
-          estado: "presente" as const,
+          estado: "presente" as EstadoAsistencia,
           nota: "",
         }))
       );
@@ -115,7 +190,7 @@ function RegistroDiarioView() {
     setRegistros((prev) =>
       prev.map((r) => {
         if (r.alumno_id !== alumnoId) return r;
-        const estados: Array<keyof typeof ESTADOS> = ["presente", "ausente", "retardo", "justificado"];
+        const estados: EstadoAsistencia[] = ["presente", "ausente", "retardo", "justificado"];
         const idx = estados.indexOf(r.estado);
         const next = estados[(idx + 1) % estados.length];
         return { ...r, estado: next };
@@ -123,22 +198,44 @@ function RegistroDiarioView() {
     );
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!userId) { toast.error("Debes iniciar sesión."); return; }
     setSaving(true);
-    const nuevoRegistro: RegistroAsistencia = {
-      id: registroExistente?.id || `as-${Date.now()}`,
-      fecha,
-      grupo,
-      registros,
-    };
-    setAsistencias((prev) => {
-      const filtrado = prev.filter((a) => !(a.fecha === fecha && a.grupo === grupo));
-      return [nuevoRegistro, ...filtrado];
-    });
-    setTimeout(() => {
+    try {
+      const payload = {
+        user_id: userId,
+        fecha,
+        grupo,
+        registros,
+      };
+
+      let error;
+      if (registroExistente) {
+        const { error: updError } = await supabase
+          .from("asistencia")
+          .update({ registros, creado_en: new Date().toISOString() })
+          .eq("id", registroExistente.id);
+        error = updError;
+      } else {
+        const { error: insError } = await supabase.from("asistencia").insert(payload);
+        error = insError;
+      }
+
+      if (error) {
+        if (error.code === "42P01") {
+          toast.error("❌ La tabla 'asistencia' no existe. Ejecuta el SQL de configuración.");
+        } else {
+          throw error;
+        }
+      } else {
+        toast.success("Asistencia guardada correctamente.");
+        loadData();
+      }
+    } catch (err: any) {
+      toast.error("Error: " + err.message);
+    } finally {
       setSaving(false);
-      toast.success("Asistencia guardada correctamente.");
-    }, 400);
+    }
   };
 
   const stats = useMemo(() => {
@@ -149,6 +246,10 @@ function RegistroDiarioView() {
     const justificados = registros.filter((r) => r.estado === "justificado").length;
     return { total, presentes, ausentes, retardos, justificados };
   }, [registros]);
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  }
 
   return (
     <div className="space-y-4">
@@ -162,86 +263,129 @@ function RegistroDiarioView() {
         </select>
         <Button size="sm" className="gap-2 ml-auto" onClick={handleSave} disabled={saving}>
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          {saving ? "Guardando..." : "Guardar Registro"}
+          {saving ? "Guardando..." : registroExistente ? "Actualizar Registro" : "Guardar Registro"}
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "Presentes", value: stats.presentes, className: "bg-emerald-50 text-emerald-700" },
-          { label: "Ausentes", value: stats.ausentes, className: "bg-red-50 text-red-700" },
-          { label: "Retardos", value: stats.retardos, className: "bg-amber-50 text-amber-700" },
-          { label: "Justificados", value: stats.justificados, className: "bg-blue-50 text-blue-700" },
-        ].map((s) => (
-          <div key={s.label} className={`${s.className} rounded-xl p-3 border border-border text-center`}>
-            <p className="text-lg font-bold">{s.value}</p>
-            <p className="text-xs">{s.label}</p>
-          </div>
-        ))}
-      </div>
+      {alumnosGrupo.length === 0 && (
+        <div className="text-center py-8 text-muted-foreground bg-card rounded-xl border border-border">
+          <UserCheck className="w-8 h-8 mx-auto mb-2 opacity-50" />
+          <p className="text-sm">No hay alumnos activos en el grupo {grupo}.</p>
+          <p className="text-xs mt-1">Registra alumnos primero en la sección de Alumnos.</p>
+        </div>
+      )}
 
-      <div className="space-y-2">
-        {registros.map((r) => {
-          const cfg = ESTADOS[r.estado];
-          const Icon = cfg.icon;
-          return (
-            <motion.div
-              key={r.alumno_id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="bg-card rounded-xl p-3 border border-border flex items-center justify-between gap-3"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-bold">
-                  {r.alumno_nombre[0]}
-                </div>
-                <span className="text-sm font-medium">{r.alumno_nombre}</span>
+      {alumnosGrupo.length > 0 && (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Presentes", value: stats.presentes, className: "bg-emerald-50 text-emerald-700" },
+              { label: "Ausentes", value: stats.ausentes, className: "bg-red-50 text-red-700" },
+              { label: "Retardos", value: stats.retardos, className: "bg-amber-50 text-amber-700" },
+              { label: "Justificados", value: stats.justificados, className: "bg-blue-50 text-blue-700" },
+            ].map((s) => (
+              <div key={s.label} className={`${s.className} rounded-xl p-3 border border-border text-center`}>
+                <p className="text-lg font-bold">{s.value}</p>
+                <p className="text-xs">{s.label}</p>
               </div>
-              <button
-                onClick={() => toggleEstado(r.alumno_id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${cfg.className}`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {cfg.label}
-              </button>
-            </motion.div>
-          );
-        })}
-      </div>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            {registros.map((r) => {
+              const cfg = ESTADOS[r.estado];
+              const Icon = cfg.icon;
+              return (
+                <motion.div
+                  key={r.alumno_id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="bg-card rounded-xl p-3 border border-border flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-bold">
+                      {r.alumno_nombre[0]}
+                    </div>
+                    <span className="text-sm font-medium">{r.alumno_nombre}</span>
+                  </div>
+                  <button
+                    onClick={() => toggleEstado(r.alumno_id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${cfg.className}`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {cfg.label}
+                  </button>
+                </motion.div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-/* ═════════════════════ JUSTIFICACIONES ═════════════════════ */
+/* ═════════════════════ JUSTIFICACIONES (SUPABASE) ═════════════════════ */
 
 function JustificacionesView() {
-  const [justificaciones, setJustificaciones] = useStoreItem(store.justificaciones);
+  const [justificaciones, setJustificaciones] = useState<Justificacion[]>([]);
+  const [alumnos, setAlumnos] = useState<AlumnoMini[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) { setLoading(false); return; }
+      setUserId(uid);
+
+      const [{ data: jData }, { data: alData }] = await Promise.all([
+        supabase.from("justificaciones").select("*").eq("user_id", uid).order("desde", { ascending: false }),
+        supabase.from("alumnos").select("id, nombre, grupo, activo").eq("user_id", uid).eq("activo", true),
+      ]);
+
+      setJustificaciones((jData as Justificacion[]) || []);
+      setAlumnos((alData as AlumnoMini[]) || []);
+    } catch (err) {
+      console.error("[Justificaciones] Error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const filtered = justificaciones.filter((j) =>
     j.alumno_nombre.toLowerCase().includes(search.toLowerCase()) ||
     j.motivo.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar esta justificación?")) return;
-    setJustificaciones((prev) => prev.filter((j) => j.id !== id));
-    toast.success("Justificación eliminada.");
+    try {
+      const { error } = await supabase.from("justificaciones").delete().eq("id", id);
+      if (error) throw error;
+      setJustificaciones((prev) => prev.filter((j) => j.id !== id));
+      toast.success("Justificación eliminada.");
+    } catch (err: any) {
+      toast.error("Error: " + err.message);
+    }
   };
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Buscar justificación..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary transition-colors"
-          />
+          <input type="text" placeholder="Buscar justificación..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
           <Plus className="w-4 h-4" /> Nueva Justificación
@@ -258,11 +402,7 @@ function JustificacionesView() {
 
       <div className="space-y-2">
         {filtered.map((j, i) => (
-          <motion.div
-            key={j.id}
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.03 }}
+          <motion.div key={j.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
             className="bg-card rounded-xl p-4 border border-border shadow-sm hover:shadow-md transition-shadow"
           >
             <div className="flex items-start justify-between gap-3">
@@ -276,11 +416,7 @@ function JustificacionesView() {
                 </p>
                 <p className="text-sm text-foreground">{j.motivo}</p>
               </div>
-              <button
-                onClick={() => handleDelete(j.id)}
-                className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors"
-                title="Eliminar"
-              >
+              <button onClick={() => handleDelete(j.id)} className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors" title="Eliminar">
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
@@ -289,26 +425,25 @@ function JustificacionesView() {
       </div>
 
       <AnimatePresence>
-        {showModal && <NuevaJustificacionModal onClose={() => setShowModal(false)} />}
+        {showModal && <NuevaJustificacionModal onClose={() => { setShowModal(false); loadData(); }} alumnos={alumnos} userId={userId} />}
       </AnimatePresence>
     </div>
   );
 }
 
-function NuevaJustificacionModal({ onClose }: { onClose: () => void }) {
-  const [alumnos] = useStoreItem(store.alumnos);
+function NuevaJustificacionModal({ onClose, alumnos, userId }: { onClose: () => void; alumnos: AlumnoMini[]; userId: string | null }) {
   const [alumnoId, setAlumnoId] = useState(alumnos[0]?.id || "");
   const [desde, setDesde] = useState(new Date().toISOString().split("T")[0]);
   const [hasta, setHasta] = useState(new Date().toISOString().split("T")[0]);
   const [motivo, setMotivo] = useState("");
   const [saving, setSaving] = useState(false);
-  const [, setJustificaciones] = useStoreItem(store.justificaciones);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!alumnoId || !desde || !hasta || !motivo.trim()) {
       toast.error("Completa todos los campos obligatorios.");
       return;
     }
+    if (!userId) { toast.error("Debes iniciar sesión."); return; }
     if (new Date(desde) > new Date(hasta)) {
       toast.error("La fecha 'Desde' no puede ser mayor que 'Hasta'.");
       return;
@@ -317,21 +452,31 @@ function NuevaJustificacionModal({ onClose }: { onClose: () => void }) {
     if (!alumno) return;
 
     setSaving(true);
-    const nueva: Justificacion = {
-      id: `j-${Date.now()}`,
-      alumno_id: alumnoId,
-      alumno_nombre: alumno.nombre,
-      desde,
-      hasta,
-      motivo: motivo.trim(),
-      creado_en: new Date().toISOString(),
-    };
-    setJustificaciones((prev) => [nueva, ...prev]);
-    setTimeout(() => {
+    try {
+      const { error } = await supabase.from("justificaciones").insert({
+        user_id: userId,
+        alumno_id: alumnoId,
+        alumno_nombre: alumno.nombre,
+        desde,
+        hasta,
+        motivo: motivo.trim(),
+      });
+
+      if (error) {
+        if (error.code === "42P01") {
+          toast.error("❌ La tabla 'justificaciones' no existe. Ejecuta el SQL de configuración.");
+        } else {
+          throw error;
+        }
+      } else {
+        toast.success("Justificación guardada correctamente.");
+        onClose();
+      }
+    } catch (err: any) {
+      toast.error("Error: " + err.message);
+    } finally {
       setSaving(false);
-      toast.success("Justificación guardada correctamente.");
-      onClose();
-    }, 400);
+    }
   };
 
   return (
@@ -340,7 +485,7 @@ function NuevaJustificacionModal({ onClose }: { onClose: () => void }) {
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Alumno *</label>
           <select value={alumnoId} onChange={(e) => setAlumnoId(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-            {alumnos.filter((a) => a.activo).map((a) => <option key={a.id} value={a.id}>{a.nombre} ({a.grupo})</option>)}
+            {alumnos.map((a) => <option key={a.id} value={a.id}>{a.nombre} ({a.grupo})</option>)}
           </select>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -369,22 +514,43 @@ function NuevaJustificacionModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-/* ═════════════════════ REPORTES ═════════════════════ */
+/* ═════════════════════ REPORTES (SUPABASE) ═════════════════════ */
 
 function ReportesView() {
-  const [asistencias] = useStoreItem(store.asistencia);
+  const [asistencias, setAsistencias] = useState<AsistenciaDia[]>([]);
+  const [loading, setLoading] = useState(true);
   const [grupo, setGrupo] = useState(GRUPOS[0]);
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) { setLoading(false); return; }
+
+      const { data, error } = await supabase
+        .from("asistencia")
+        .select("*")
+        .eq("user_id", uid)
+        .order("fecha", { ascending: false });
+
+      if (error) console.error("[Reportes] Error:", error);
+      else setAsistencias((data as AsistenciaDia[]) || []);
+    } catch (err) {
+      console.error("[Reportes] Error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const registrosGrupo = asistencias.filter((a) => a.grupo === grupo);
 
   const stats = useMemo(() => {
-    let total = 0;
-    let presentes = 0;
-    let ausentes = 0;
-    let retardos = 0;
-    let justificados = 0;
+    let total = 0, presentes = 0, ausentes = 0, retardos = 0, justificados = 0;
     registrosGrupo.forEach((r) => {
-      r.registros.forEach((reg) => {
+      (r.registros || []).forEach((reg) => {
         total++;
         if (reg.estado === "presente") presentes++;
         if (reg.estado === "ausente") ausentes++;
@@ -394,6 +560,10 @@ function ReportesView() {
     });
     return { total, presentes, ausentes, retardos, justificados };
   }, [registrosGrupo]);
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  }
 
   return (
     <div className="space-y-4">
@@ -429,17 +599,17 @@ function ReportesView() {
       )}
 
       <div className="space-y-2">
-        {registrosGrupo.sort((a, b) => +new Date(b.fecha) - +new Date(a.fecha)).map((r) => (
+        {registrosGrupo.map((r) => (
           <div key={r.id} className="bg-card rounded-xl p-4 border border-border">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-sm font-semibold">{formatDate(r.fecha)}</h4>
               <Badge variant="outline" className="text-xs">{r.grupo}</Badge>
             </div>
             <div className="flex gap-2 flex-wrap text-xs">
-              <span className="text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">P: {r.registros.filter((x) => x.estado === "presente").length}</span>
-              <span className="text-red-600 bg-red-50 px-2 py-1 rounded-md">A: {r.registros.filter((x) => x.estado === "ausente").length}</span>
-              <span className="text-amber-600 bg-amber-50 px-2 py-1 rounded-md">R: {r.registros.filter((x) => x.estado === "retardo").length}</span>
-              <span className="text-blue-600 bg-blue-50 px-2 py-1 rounded-md">J: {r.registros.filter((x) => x.estado === "justificado").length}</span>
+              <span className="text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">P: {(r.registros || []).filter((x) => x.estado === "presente").length}</span>
+              <span className="text-red-600 bg-red-50 px-2 py-1 rounded-md">A: {(r.registros || []).filter((x) => x.estado === "ausente").length}</span>
+              <span className="text-amber-600 bg-amber-50 px-2 py-1 rounded-md">R: {(r.registros || []).filter((x) => x.estado === "retardo").length}</span>
+              <span className="text-blue-600 bg-blue-50 px-2 py-1 rounded-md">J: {(r.registros || []).filter((x) => x.estado === "justificado").length}</span>
             </div>
           </div>
         ))}
