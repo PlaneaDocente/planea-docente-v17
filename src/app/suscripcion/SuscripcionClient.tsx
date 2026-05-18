@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import {
   Check, Loader2, Zap, Building2, GraduationCap, ArrowRight,
   AlertTriangle, RefreshCw, Shield, Clock, Sparkles, Crown,
-  ChevronRight, LogIn, AlertCircle, Info
+  LogIn, AlertCircle, Info
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -72,7 +72,6 @@ const FALLBACK_PLANS: SubscriptionPlan[] = [
   },
 ];
 
-// Validación estricta: rechaza placeholders como price_XXX, price_YYY, etc.
 function isValidStripePriceId(val: unknown): boolean {
   if (typeof val !== "string") return false;
   const trimmed = val.trim();
@@ -138,7 +137,7 @@ export default function SuscripcionClient() {
       let normalizedPlans: SubscriptionPlan[] = [];
       let apiSuccess = false;
 
-      // A) API subscription-plans (pública, no necesita auth)
+      // A) API subscription-plans (pública)
       try {
         const res = await fetch("/api/subscription-plans", { cache: "no-store" });
         if (res.ok) {
@@ -191,7 +190,7 @@ export default function SuscripcionClient() {
       setStripeConfigured(hasStripeIds);
       setPlans(normalizedPlans);
 
-      // C) Obtener suscripción del usuario (con token JWT en header)
+      // C) Obtener suscripción del usuario (SOLO si hay token)
       if (uid && token) {
         let subData: any = null;
 
@@ -209,6 +208,8 @@ export default function SuscripcionClient() {
             subData = subJson.data?.subscription ?? subJson.subscription ?? null;
           } else if (subRes.status === 401) {
             console.warn("[Suscripcion] Token expirado o inválido en user-subscription");
+          } else if (subRes.status === 500) {
+            console.warn("[Suscripcion] Error 500 en user-subscription API");
           }
         } catch (e) {
           console.warn("[Suscripcion] API user-subscription falló:", e);
@@ -216,15 +217,20 @@ export default function SuscripcionClient() {
 
         // C.2) Fallback Supabase directo (RLS protege)
         if (!subData) {
-          const { data: dbSub } = await supabase
-            .from("subscriptions")
-            .select("plan_id, estado, trial_end")
-            .eq("user_id", uid)
-            .or("estado.eq.trialing,estado.eq.active,estado.eq.past_due")
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          subData = dbSub;
+          try {
+            const { data: dbSub, error: subErr } = await supabase
+              .from("subscriptions")
+              .select("plan_id, estado, trial_end")
+              .eq("user_id", uid)
+              .or("estado.eq.trialing,estado.eq.active,estado.eq.past_due")
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (!subErr) subData = dbSub;
+            else console.warn("[Suscripcion] Fallback Supabase error:", subErr.message);
+          } catch (e) {
+            console.warn("[Suscripcion] Fallback Supabase excepción:", e);
+          }
         }
 
         if (subData) {
@@ -233,7 +239,12 @@ export default function SuscripcionClient() {
             estado: subData.estado ?? "active",
             trial_end: subData.trial_end ?? null,
           });
+        } else {
+          setCurrentSubscription(null);
         }
+      } else {
+        // No hay sesión, limpiar suscripción
+        setCurrentSubscription(null);
       }
 
       setLoadState("ready");
@@ -278,10 +289,9 @@ export default function SuscripcionClient() {
         ? (plan.stripe_price_id_anual || plan.stripe_price_id)
         : plan.stripe_price_id;
 
-      // Validación ULTRA-estricta en frontend
       if (!isValidStripePriceId(rawPriceId)) {
         toast.error(
-          `⚠️ El plan "${plan.nombre}" no tiene un precio de Stripe configurado. Contacta al administrador.`,
+          `⚠️ El plan "${plan.nombre}" no tiene un precio de Stripe configurado.`,
           { duration: 8000 }
         );
         setCheckoutLoading(false);
@@ -313,9 +323,7 @@ export default function SuscripcionClient() {
         if (code === "UNAUTHENTICATED" || res.status === 401) {
           toast.error("❌ Sesión expirada. Vuelve a iniciar sesión.", { duration: 8000 });
           router.push("/login?redirect=/suscripcion");
-        } else if (code === "STRIPE_RESOURCE_MISSING") {
-          toast.error(`❌ ${detail}`, { duration: 8000 });
-        } else if (code === "INVALID_PRICE_ID") {
+        } else if (code === "STRIPE_RESOURCE_MISSING" || code === "INVALID_PRICE_ID") {
           toast.error(`❌ ${detail}`, { duration: 8000 });
         } else {
           toast.error(detail);
