@@ -6,6 +6,7 @@ import React, {
   useState,
   useCallback,
   useEffect,
+  useRef,
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
@@ -68,6 +69,15 @@ const AppStoreContext = createContext<AppStoreState | null>(null);
 const LS_KEY_SECTION = "pd_active_section";
 const LS_KEY_SIDEBAR = "pd_sidebar_open";
 
+// ── Helper: normalizar texto para comparaciones seguras ──────────────────
+function normalizeText(text: string | null | undefined): string {
+  if (!text) return "";
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   // ── Estados de UI (con persistencia localStorage) ────────────────────────
   const [activeSection, setActiveSectionState] = useState<ActiveSection>(() => {
@@ -95,6 +105,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [isPremium, setIsPremium] = useState(false);
   const [trialDaysLeft, setTrialDaysLeft] = useState<number | null>(null);
+
+  // Ref para evitar múltiples llamadas concurrentes a refreshSubscription
+  const isRefreshingRef = useRef(false);
 
   // ── Persistencia de UI ───────────────────────────────────────────────────
   const setActiveSection = useCallback((section: ActiveSection) => {
@@ -125,63 +138,50 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     setCurrentUserState(user);
   }, []);
 
-  // ── Carga inicial de sesión ──────────────────────────────────────────────
-  useEffect(() => {
-    const initSession = async () => {
-      setIsAuthLoading(true);
-      setAuthError(null);
-      try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error("[AppStore] Session init error:", error);
-          setAuthError(error.message);
-          setIsAuthLoading(false);
-          return;
-        }
-
-        if (data.session?.user) {
-          setCurrentUserState(data.session.user);
-          // Cargar suscripción automáticamente
-          await refreshSubscriptionInternal(data.session.user.id);
-        }
-      } catch (err) {
-        console.error("[AppStore] Unexpected init error:", err);
-        setAuthError("Error al cargar la sesión.");
-      } finally {
-        setIsAuthLoading(false);
-      }
-    };
-
-    initSession();
-
-    // Escuchar cambios de auth globalmente
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (event === "SIGNED_IN" && session?.user) {
-          setCurrentUserState(session.user);
-          refreshSubscriptionInternal(session.user.id);
-        } else if (event === "SIGNED_OUT") {
-          setCurrentUserState(null);
-          setSubscription(null);
-          setIsPremium(false);
-          setTrialDaysLeft(null);
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, []);
-
   // ── Función interna de refresco de suscripción ───────────────────────────
-  const refreshSubscriptionInternal = async (userId: string) => {
+  // AHORA con token JWT en header Authorization para evitar 401
+  const refreshSubscriptionInternal = useCallback(async (userId: string) => {
+    if (isRefreshingRef.current) {
+      console.log("[AppStore] Refresh already in progress, skipping...");
+      return;
+    }
+    isRefreshingRef.current = true;
+
     try {
-      const res = await fetch(`/api/user-subscription?user_id=${userId}`, {
+      // Obtener token JWT de la sesión activa
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error("[AppStore] Error getting session for subscription refresh:", sessionError);
+        setSubscription(null);
+        setIsPremium(false);
+        setTrialDaysLeft(null);
+        return;
+      }
+
+      const token = sessionData.session?.access_token;
+
+      if (!token) {
+        console.warn("[AppStore] No access token available, skipping subscription refresh");
+        setSubscription(null);
+        setIsPremium(false);
+        setTrialDaysLeft(null);
+        return;
+      }
+
+      const res = await fetch(`/api/user-subscription`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
         cache: "no-store",
       });
+
       const json = await res.json();
 
       if (!res.ok || !json.success) {
-        console.warn("[AppStore] Subscription fetch failed:", json.error);
+        console.warn("[AppStore] Subscription fetch failed:", json.error || `HTTP ${res.status}`);
         setSubscription(null);
         setIsPremium(false);
         setTrialDaysLeft(null);
@@ -226,8 +226,61 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       setSubscription(null);
       setIsPremium(false);
       setTrialDaysLeft(null);
+    } finally {
+      isRefreshingRef.current = false;
     }
-  };
+  }, []);
+
+  // ── Carga inicial de sesión ──────────────────────────────────────────────
+  useEffect(() => {
+    const initSession = async () => {
+      setIsAuthLoading(true);
+      setAuthError(null);
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error("[AppStore] Session init error:", error);
+          setAuthError(error.message);
+          setIsAuthLoading(false);
+          return;
+        }
+
+        if (data.session?.user) {
+          setCurrentUserState(data.session.user);
+          // Cargar suscripción automáticamente con token JWT
+          await refreshSubscriptionInternal(data.session.user.id);
+        }
+      } catch (err) {
+        console.error("[AppStore] Unexpected init error:", err);
+        setAuthError("Error al cargar la sesión.");
+      } finally {
+        setIsAuthLoading(false);
+      }
+    };
+
+    initSession();
+
+    // Escuchar cambios de auth globalmente
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "SIGNED_IN" && session?.user) {
+          setCurrentUserState(session.user);
+          refreshSubscriptionInternal(session.user.id);
+        } else if (event === "SIGNED_OUT") {
+          setCurrentUserState(null);
+          setSubscription(null);
+          setIsPremium(false);
+          setTrialDaysLeft(null);
+        } else if (event === "TOKEN_REFRESHED" && session?.user) {
+          // Actualizar usuario y refrescar suscripción cuando el token se renueva
+          setCurrentUserState(session.user);
+          refreshSubscriptionInternal(session.user.id);
+        }
+      }
+    );
+
+    return () => subscription.unsubscribe();
+  }, [refreshSubscriptionInternal]);
 
   // ── Acción pública: refrescar suscripción ─────────────────────────────────
   const refreshSubscription = useCallback(async () => {
@@ -238,7 +291,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     await refreshSubscriptionInternal(currentUser.id);
-  }, [currentUser]);
+  }, [currentUser, refreshSubscriptionInternal]);
 
   // ── Acción pública: logout ────────────────────────────────────────────────
   const logout = useCallback(async () => {
@@ -260,22 +313,26 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   // ── Acción pública: verificar función por plan ────────────────────────────
   const canUseFeature = useCallback(
     (featureName: string): boolean => {
+      const normalizedFeature = normalizeText(featureName);
+
       // Si no hay suscripción, solo funciones básicas
       if (!subscription || !isPremium) {
         const basicFeatures = ["inicio", "alumnos", "asistencia"];
-        return basicFeatures.includes(featureName);
+        return basicFeatures.includes(normalizedFeature);
       }
 
+      const normalizedPlan = normalizeText(subscription.plan_name);
+
       // Plan Profesional e Institucional tienen acceso a todo
-      if (subscription.plan_name?.toLowerCase().includes("profesional")) {
+      if (normalizedPlan.includes("profesional")) {
         return true;
       }
-      if (subscription.plan_name?.toLowerCase().includes("institucional")) {
+      if (normalizedPlan.includes("institucional")) {
         return true;
       }
 
       // Plan Básico: funciones limitadas
-      if (subscription.plan_name?.toLowerCase().includes("básico")) {
+      if (normalizedPlan.includes("basico")) {
         const basicFeatures = [
           "inicio",
           "alumnos",
@@ -284,7 +341,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
           "actividades",
           "evaluaciones",
         ];
-        return basicFeatures.includes(featureName);
+        return basicFeatures.includes(normalizedFeature);
       }
 
       // Fallback: permitir si está en trial o active
