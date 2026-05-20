@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import {
   Check, Loader2, Zap, Building2, GraduationCap, ArrowRight,
   AlertTriangle, RefreshCw, Shield, Clock, Sparkles, Crown,
-  LogIn, AlertCircle, Info, Wrench
+  LogIn, AlertCircle, Info
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -34,20 +34,6 @@ interface CurrentSubscription {
   plan_id: string;
   estado: string;
   trial_end: string | null;
-}
-
-interface StripeDiagnostics {
-  stripe_configured: boolean;
-  stripe_secret_key_present: boolean;
-  user_authenticated: boolean;
-  user_id: string | null;
-}
-
-interface PriceVerification {
-  price_id: string | null;
-  valid: boolean;
-  exists_in_stripe: boolean;
-  error?: string;
 }
 
 type LoadingState = "idle" | "loading" | "error" | "ready";
@@ -92,8 +78,9 @@ function isValidStripePriceId(val: unknown): boolean {
   if (!trimmed.startsWith("price_")) return false;
   if (trimmed.length < 10) return false;
   const lower = trimmed.toLowerCase();
-  const invalidPatterns = ["xxx", "yyy", "zzz", "placeholder", "test_", "demo", "example", "sample", "fake"];
-  if (invalidPatterns.some(p => lower.includes(p))) return false;
+  if (lower.includes("xxx") || lower.includes("yyy") || lower.includes("zzz")) return false;
+  if (lower.includes("placeholder") || lower.includes("test") || lower.includes("demo")) return false;
+  if (lower.includes("example") || lower.includes("sample")) return false;
   return true;
 }
 
@@ -112,10 +99,6 @@ export default function SuscripcionClient() {
   const [stripeConfigured, setStripeConfigured] = useState(false);
   const [billing, setBilling] = useState<"monthly" | "annual">("monthly");
   const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [stripeDiagnostics, setStripeDiagnostics] = useState<StripeDiagnostics | null>(null);
-  const [priceVerifications, setPriceVerifications] = useState<Record<string, PriceVerification>>({});
-  const [showConfigModal, setShowConfigModal] = useState(false);
-  const [configInstructions, setConfigInstructions] = useState<string[]>([]);
 
   // ─── OBTENER SESIÓN Y TOKEN JWT ───
   useEffect(() => {
@@ -137,69 +120,6 @@ export default function SuscripcionClient() {
       listener.subscription.unsubscribe();
     };
   }, []);
-
-  // ─── DIAGNÓSTICO DE STRIPE ───
-  const runStripeDiagnostics = useCallback(async () => {
-    try {
-      const res = await fetch("/next_api/stripe/checkout", { method: "GET", cache: "no-store" });
-      if (res.ok) {
-        const json = await res.json();
-        setStripeDiagnostics(json.diagnostics);
-      }
-    } catch (e) {
-      console.warn("[Suscripcion] Diagnóstico Stripe falló:", e);
-    }
-  }, []);
-
-  // ─── VERIFICAR PRICE_IDS CONTRA STRIPE ───
-  const verifyPrices = useCallback(async (plansToVerify: SubscriptionPlan[]) => {
-    const verifications: Record<string, PriceVerification> = {};
-
-    for (const plan of plansToVerify) {
-      const priceId = billing === "annual" 
-        ? (plan.stripe_price_id_anual || plan.stripe_price_id)
-        : plan.stripe_price_id;
-
-      if (!isValidStripePriceId(priceId)) {
-        verifications[plan.id] = { price_id: priceId || "", valid: false, exists_in_stripe: false, error: "Formato inválido o placeholder" };
-        continue;
-      }
-
-      // Verificar contra el backend
-      try {
-        const res = await fetch("/next_api/stripe/checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ price_id: priceId, plan_id: plan.id, billing: billing === "annual" ? "year" : "month" }),
-        });
-
-        if (res.status === 401) {
-          verifications[plan.id] = { price_id: priceId, valid: false, exists_in_stripe: false, error: "Requiere autenticación" };
-        } else if (res.status === 503) {
-          verifications[plan.id] = { price_id: priceId, valid: false, exists_in_stripe: false, error: "Stripe no configurado en servidor" };
-        } else if (res.status === 400) {
-          const json = await res.json();
-          if (json.code === "STRIPE_RESOURCE_MISSING") {
-            verifications[plan.id] = { price_id: priceId, valid: false, exists_in_stripe: false, error: `No existe en Stripe: ${priceId}` };
-          } else {
-            verifications[plan.id] = { price_id: priceId, valid: false, exists_in_stripe: false, error: json.error || "Error de validación" };
-          }
-        } else if (res.ok) {
-          verifications[plan.id] = { price_id: priceId, valid: true, exists_in_stripe: true };
-        } else {
-          verifications[plan.id] = { price_id: priceId, valid: false, exists_in_stripe: false, error: `Error ${res.status}` };
-        }
-      } catch (e) {
-        verifications[plan.id] = { price_id: priceId || "", valid: false, exists_in_stripe: false, error: "Error de red" };
-      }
-    }
-
-    setPriceVerifications(verifications);
-
-    // Actualizar stripeConfigured basado en verificaciones
-    const hasAnyValid = Object.values(verifications).some(v => v.valid);
-    setStripeConfigured(hasAnyValid);
-  }, [billing]);
 
   // ─── CARGAR PLANES Y SUSCRIPCIÓN ───
   const loadData = useCallback(async () => {
@@ -262,15 +182,19 @@ export default function SuscripcionClient() {
         toast.warning("Mostrando planes de respaldo.");
       }
 
+      // Verificar Stripe configurado
+      const hasStripeIds = normalizedPlans.some((p) => {
+        const pid = billing === "annual" ? p.stripe_price_id_anual : p.stripe_price_id;
+        return isValidStripePriceId(pid);
+      });
+      setStripeConfigured(hasStripeIds);
       setPlans(normalizedPlans);
 
-      // Verificar price_ids
-      await verifyPrices(normalizedPlans);
-
-      // C) Obtener suscripción del usuario
+      // C) Obtener suscripción del usuario (SOLO si hay token)
       if (uid && token) {
         let subData: any = null;
 
+        // C.1) API user-subscription con Bearer token
         try {
           const subRes = await fetch("/api/user-subscription", {
             cache: "no-store",
@@ -282,11 +206,16 @@ export default function SuscripcionClient() {
           if (subRes.ok) {
             const subJson = await subRes.json();
             subData = subJson.data?.subscription ?? subJson.subscription ?? null;
+          } else if (subRes.status === 401) {
+            console.warn("[Suscripcion] Token expirado o inválido en user-subscription");
+          } else if (subRes.status === 500) {
+            console.warn("[Suscripcion] Error 500 en user-subscription API");
           }
         } catch (e) {
           console.warn("[Suscripcion] API user-subscription falló:", e);
         }
 
+        // C.2) Fallback Supabase directo (RLS protege)
         if (!subData) {
           try {
             const { data: dbSub, error: subErr } = await supabase
@@ -298,6 +227,7 @@ export default function SuscripcionClient() {
               .limit(1)
               .maybeSingle();
             if (!subErr) subData = dbSub;
+            else console.warn("[Suscripcion] Fallback Supabase error:", subErr.message);
           } catch (e) {
             console.warn("[Suscripcion] Fallback Supabase excepción:", e);
           }
@@ -313,11 +243,9 @@ export default function SuscripcionClient() {
           setCurrentSubscription(null);
         }
       } else {
+        // No hay sesión, limpiar suscripción
         setCurrentSubscription(null);
       }
-
-      // Diagnóstico de Stripe
-      await runStripeDiagnostics();
 
       setLoadState("ready");
     } catch (err: any) {
@@ -326,7 +254,7 @@ export default function SuscripcionClient() {
       setPlans(FALLBACK_PLANS);
       setLoadState("ready");
     }
-  }, [billing, verifyPrices, runStripeDiagnostics]);
+  }, [billing]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => {
@@ -340,8 +268,6 @@ export default function SuscripcionClient() {
     setCheckoutLoading(true);
     setActivePlanId(plan.id);
     setErrorMsg(null);
-    setShowConfigModal(false);
-    setConfigInstructions([]);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -365,7 +291,7 @@ export default function SuscripcionClient() {
 
       if (!isValidStripePriceId(rawPriceId)) {
         toast.error(
-          `⚠️ El plan "${plan.nombre}" no tiene un precio de Stripe configurado correctamente.`,
+          `⚠️ El plan "${plan.nombre}" no tiene un precio de Stripe configurado.`,
           { duration: 8000 }
         );
         setCheckoutLoading(false);
@@ -392,30 +318,13 @@ export default function SuscripcionClient() {
 
       if (!res.ok) {
         const code = json.code || "UNKNOWN";
-        const detail = json.error || "Error al procesar el pago";
+        const detail = json.detail || json.error || "Error al procesar el pago";
 
         if (code === "UNAUTHENTICATED" || res.status === 401) {
           toast.error("❌ Sesión expirada. Vuelve a iniciar sesión.", { duration: 8000 });
           router.push("/login?redirect=/suscripcion");
-        } else if (code === "STRIPE_NOT_CONFIGURED") {
-          toast.error(`❌ ${detail}`, { duration: 10000 });
-          setConfigInstructions([
-            "1. Ve a Vercel Dashboard → Environment Variables",
-            "2. Agrega STRIPE_SECRET_KEY (de Stripe Dashboard → Developers → API Keys)",
-            "3. Redeploy el proyecto",
-          ]);
-          setShowConfigModal(true);
-        } else if (code === "STRIPE_RESOURCE_MISSING") {
-          toast.error(`❌ ${detail}`, { duration: 10000 });
-          setConfigInstructions(json.instructions || [
-            "1. Ve a https://dashboard.stripe.com/products",
-            "2. Crea un producto con el precio correspondiente",
-            "3. Copia el price_id (empieza con price_)",
-            `4. Actualiza la tabla subscription_plans en Supabase para plan_id="${plan.id}"`,
-          ]);
-          setShowConfigModal(true);
-        } else if (code === "INVALID_PRICE_ID_FORMAT") {
-          toast.error(`❌ ${detail}`, { duration: 10000 });
+        } else if (code === "STRIPE_RESOURCE_MISSING" || code === "INVALID_PRICE_ID") {
+          toast.error(`❌ ${detail}`, { duration: 8000 });
         } else {
           toast.error(detail);
         }
@@ -468,17 +377,16 @@ export default function SuscripcionClient() {
           </motion.div>
         </div>
 
-        {/* ─── Banner de diagnóstico Stripe ─── */}
-        {stripeDiagnostics && !stripeDiagnostics.stripe_configured && (
+        {!stripeConfigured && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto">
             <Card className="border-amber-300 bg-amber-50/80">
               <CardContent className="p-5">
                 <div className="flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
                   <div className="flex-1">
-                    <h3 className="font-semibold text-amber-800 text-sm">⚠️ Stripe no está configurado</h3>
+                    <h3 className="font-semibold text-amber-800 text-sm">⚠️ Pagos temporalmente deshabilitados</h3>
                     <p className="text-xs text-amber-700 mt-1">
-                      Los pagos están temporalmente deshabilitados. El sistema funciona con prueba gratuita.
+                      Los planes muestran precios correctamente, pero aún no están conectados con Stripe.
                     </p>
                     <div className="mt-3 bg-white/60 rounded-lg p-3 text-xs text-amber-800 space-y-1">
                       <p className="font-medium">Para activar pagos:</p>
@@ -486,36 +394,9 @@ export default function SuscripcionClient() {
                         <li>Ve a <a href="https://dashboard.stripe.com/products" target="_blank" rel="noopener noreferrer" className="underline font-semibold">Stripe Dashboard → Products</a></li>
                         <li>Crea 3 productos (Básico $99, Profesional $199, Institucional $499)</li>
                         <li>Copia los <code>price_...</code> IDs a la tabla <code>subscription_plans</code> en Supabase</li>
-                        <li>Verifica que <code>STRIPE_SECRET_KEY</code> esté en Vercel Environment Variables</li>
+                        <li>Verifica que <code>STRIPE_SECRET_KEY</code> esté en Vercel</li>
                       </ol>
                     </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {/* ─── Modal de instrucciones de configuración ─── */}
-        {showConfigModal && configInstructions.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto">
-            <Card className="border-red-300 bg-red-50/80">
-              <CardContent className="p-5">
-                <div className="flex items-start gap-3">
-                  <Wrench className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-red-800 text-sm">🔧 Configuración requerida</h3>
-                    <p className="text-xs text-red-700 mt-1">
-                      Sigue estos pasos para activar el pago de este plan:
-                    </p>
-                    <div className="mt-3 bg-white/60 rounded-lg p-3 text-xs text-red-800 space-y-1">
-                      {configInstructions.map((instr, i) => (
-                        <p key={i}>{instr}</p>
-                      ))}
-                    </div>
-                    <Button size="sm" variant="outline" className="mt-3" onClick={() => setShowConfigModal(false)}>
-                      Entendido
-                    </Button>
                   </div>
                 </div>
               </CardContent>
@@ -584,12 +465,8 @@ export default function SuscripcionClient() {
               ? (plan.stripe_price_id_anual || plan.stripe_price_id)
               : plan.stripe_price_id;
 
-            const verification = priceVerifications[plan.id];
             const hasStripePrice = isValidStripePriceId(rawPriceId);
-            const priceVerified = verification?.valid === true;
-            const priceInvalid = verification?.valid === false;
-
-            const canSubscribe = hasStripePrice && priceVerified && !!userId && !isCurrent;
+            const canSubscribe = hasStripePrice && !!userId && !isCurrent;
             const isProcessing = checkoutLoading && activePlanId === plan.id;
 
             const monthlyPrice = plan.precio_centavos ?? plan.precio_mensual ?? 0;
@@ -608,11 +485,6 @@ export default function SuscripcionClient() {
                   {isCurrent && (
                     <div className="absolute -top-3 right-4">
                       <Badge className="bg-green-500 text-white border-0 px-3 py-1 shadow-md"><Check className="w-3 h-3 mr-1" /> Plan Actual</Badge>
-                    </div>
-                  )}
-                  {priceInvalid && (
-                    <div className="absolute -top-3 left-4">
-                      <Badge className="bg-amber-500 text-white border-0 px-3 py-1 shadow-md"><AlertTriangle className="w-3 h-3 mr-1" /> Pendiente</Badge>
                     </div>
                   )}
                   <CardHeader className="pb-2 pt-6 text-center">
@@ -639,9 +511,6 @@ export default function SuscripcionClient() {
                       {plan.dias_prueba && plan.dias_prueba > 0 && hasRealPrice && (
                         <p className="text-xs text-green-600 font-medium mt-1 flex items-center justify-center gap-1"><Clock className="w-3 h-3" />{plan.dias_prueba} días de prueba gratis</p>
                       )}
-                      {priceInvalid && verification?.error && (
-                        <p className="text-xs text-red-500 flex items-center justify-center gap-1 mt-1"><AlertCircle className="w-3 h-3" />{verification.error}</p>
-                      )}
                     </div>
                     <ul className="space-y-3 flex-1">
                       {(plan.caracteristicas || []).map((feature, i) => (
@@ -663,14 +532,10 @@ export default function SuscripcionClient() {
                           >
                             {isProcessing ? <><Loader2 className="w-4 h-4 animate-spin" /> Redirigiendo...</>
                             : !userId ? "Inicia sesión para suscribirte"
-                            : priceInvalid ? <><Wrench className="w-4 h-4" /> Configurar pago</>
                             : !hasStripePrice ? <><AlertCircle className="w-4 h-4" /> Configuración pendiente</>
                             : <><>Elegir Plan</><ArrowRight className="w-4 h-4" /></>}
                           </Button>
-                          {priceInvalid && userId && !isCurrent && (
-                            <p className="text-xs text-center text-red-500 flex items-center justify-center gap-1"><Info className="w-3 h-3" /> Este plan necesita configuración en Stripe.</p>
-                          )}
-                          {!hasStripePrice && userId && !isCurrent && !priceInvalid && (
+                          {!hasStripePrice && userId && !isCurrent && (
                             <p className="text-xs text-center text-amber-600 flex items-center justify-center gap-1"><Info className="w-3 h-3" /> Plan pendiente de configuración de pago.</p>
                           )}
                           {canSubscribe && (
