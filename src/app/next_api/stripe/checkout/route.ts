@@ -7,7 +7,10 @@ export const dynamic = 'force-dynamic';
 // ── Stripe LAZY (no inicializa si no hay key) ──────────────
 function getStripe(): Stripe | null {
   const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) return null;
+  if (!key) {
+    console.warn("[checkout] STRIPE_SECRET_KEY no configurado.");
+    return null;
+  }
   return new Stripe(key, { typescript: true });
 }
 
@@ -35,32 +38,100 @@ function getSupabaseUserClient(token: string) {
   });
 }
 
+// ── Helper: validar formato de price_id ──────────────
+function isValidPriceFormat(priceId: string): boolean {
+  if (!priceId || typeof priceId !== "string") return false;
+  const trimmed = priceId.trim();
+  if (!trimmed.startsWith("price_")) return false;
+  if (trimmed.length < 10) return false;
+  const lower = trimmed.toLowerCase();
+  const invalidPatterns = ["xxx", "yyy", "zzz", "placeholder", "test_", "demo", "example", "sample", "fake"];
+  if (invalidPatterns.some(p => lower.includes(p))) return false;
+  return true;
+}
+
+// ── Helper: obtener usuario autenticado ──────────────
+async function getAuthenticatedUser(req: NextRequest): Promise<{ userId: string; userEmail: string | null; userName: string | null; client: any } | null> {
+  // Estrategia 1: Header Authorization con token del usuario
+  const authHeader = req.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.replace("Bearer ", "").trim();
+    const supabaseUser = getSupabaseUserClient(token);
+    if (supabaseUser) {
+      const { data: userData, error: authErr } = await supabaseUser.auth.getUser(token);
+      if (!authErr && userData?.user) {
+        return { userId: userData.user.id, userEmail: userData.user.email || null, userName: userData.user.user_metadata?.full_name || null, client: supabaseUser };
+      }
+    }
+  }
+
+  // Estrategia 2: Session cookie (admin fallback)
+  const supabaseAdmin = getSupabaseAdmin();
+  if (supabaseAdmin) {
+    try {
+      const { data: sessionData } = await supabaseAdmin.auth.getSession();
+      if (sessionData?.session?.user) {
+        return { userId: sessionData.session.user.id, userEmail: sessionData.session.user.email || null, userName: sessionData.session.user.user_metadata?.full_name || null, client: supabaseAdmin };
+      }
+    } catch { /* silent */ }
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GET /next_api/stripe/checkout — Diagnóstico de configuración
+// ═══════════════════════════════════════════════════════════════
+export async function GET(req: NextRequest) {
+  try {
+    const stripe = getStripe();
+    const user = await getAuthenticatedUser(req);
+
+    const diagnostics = {
+      stripe_configured: !!stripe,
+      stripe_secret_key_present: !!process.env.STRIPE_SECRET_KEY,
+      supabase_url_present: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+      supabase_anon_key_present: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      supabase_service_role_present: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      user_authenticated: !!user,
+      user_id: user?.userId || null,
+      timestamp: new Date().toISOString(),
+    };
+
+    return NextResponse.json({ success: true, diagnostics }, { status: 200 });
+  } catch (err: any) {
+    console.error("[checkout] GET diagnostic error:", err);
+    return NextResponse.json(
+      { success: false, error: err.message || "Error de diagnóstico" },
+      { status: 500 }
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// POST /next_api/stripe/checkout — Crear sesión de pago
+// ═══════════════════════════════════════════════════════════════
 export async function POST(req: NextRequest) {
+  const requestId = Math.random().toString(36).substring(2, 10);
+  console.log(`[checkout ${requestId}] POST iniciado`);
+
   try {
     const body = await req.json();
     const { price_id, plan_id, billing = "month" } = body;
 
     // ─── VALIDAR PRICE_ID ───
     if (!price_id || typeof price_id !== "string") {
+      console.warn(`[checkout ${requestId}] price_id faltante o inválido`);
       return NextResponse.json(
         { success: false, error: "price_id es requerido", code: "MISSING_PRICE_ID" },
         { status: 400 }
       );
     }
 
-    // Rechazar placeholders
-    const lowerPrice = price_id.toLowerCase();
-    if (lowerPrice.includes("xxx") || lowerPrice.includes("yyy") || lowerPrice.includes("zzz")
-        || lowerPrice.includes("placeholder") || lowerPrice.includes("test") || lowerPrice.includes("demo")) {
+    if (!isValidPriceFormat(price_id)) {
+      console.warn(`[checkout ${requestId}] price_id con formato inválido: ${price_id}`);
       return NextResponse.json(
-        { success: false, error: "El price_id es un placeholder. Configura Stripe correctamente.", code: "PLACEHOLDER_PRICE_ID" },
-        { status: 400 }
-      );
-    }
-
-    if (!price_id.startsWith("price_")) {
-      return NextResponse.json(
-        { success: false, error: "El price_id debe empezar con price_", code: "INVALID_PRICE_ID" },
+        { success: false, error: `El price_id tiene formato inválido: "${price_id}". Debe empezar con "price_" y no contener palabras de prueba.`, code: "INVALID_PRICE_ID_FORMAT" },
         { status: 400 }
       );
     }
@@ -68,75 +139,45 @@ export async function POST(req: NextRequest) {
     // ─── STRIPE CONFIGURADO? ───
     const stripe = getStripe();
     if (!stripe) {
+      console.error(`[checkout ${requestId}] STRIPE_SECRET_KEY no configurado`);
       return NextResponse.json(
-        { success: false, error: "Stripe no está configurado en el servidor.", code: "STRIPE_NOT_CONFIGURED" },
+        { success: false, error: "Stripe no está configurado en el servidor. Agrega STRIPE_SECRET_KEY en Vercel.", code: "STRIPE_NOT_CONFIGURED" },
         { status: 503 }
       );
     }
 
-    // ─── AUTENTICACIÓN (3 estrategias) ───
-    let userId: string | null = null;
-    let userEmail: string | null = null;
-    let userName: string | null = null;
-    let activeClient: any = null;
-
-    // Estrategia 1: Header Authorization con token del usuario
-    const authHeader = req.headers.get("authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-      const token = authHeader.replace("Bearer ", "").trim();
-      const supabaseUser = getSupabaseUserClient(token);
-      if (supabaseUser) {
-        const { data: userData, error: authErr } = await supabaseUser.auth.getUser(token);
-        if (!authErr && userData?.user) {
-          userId = userData.user.id;
-          userEmail = userData.user.email || null;
-          activeClient = supabaseUser;
-        }
-      }
-    }
-
-    // Estrategia 2: Session cookie (fallback admin)
-    if (!userId) {
-      const supabaseAdmin = getSupabaseAdmin();
-      if (supabaseAdmin) {
-        try {
-          const { data: sessionData } = await supabaseAdmin.auth.getSession();
-          if (sessionData?.session?.user) {
-            userId = sessionData.session.user.id;
-            userEmail = sessionData.session.user.email || null;
-            activeClient = supabaseAdmin;
-          }
-        } catch { /* silent */ }
-      }
-    }
-
-    // Estrategia 3: user_id del body + verificación admin (último recurso)
-    if (!userId && body.user_id) {
-      const supabaseAdmin = getSupabaseAdmin();
-      if (supabaseAdmin) {
-        const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(body.user_id);
-        if (userCheck?.user) {
-          userId = userCheck.user.id;
-          userEmail = userCheck.user.email || null;
-          activeClient = supabaseAdmin;
-        }
-      }
-    }
-
-    if (!userId) {
+    // ─── AUTENTICACIÓN ───
+    const user = await getAuthenticatedUser(req);
+    if (!user) {
+      console.warn(`[checkout ${requestId}] Usuario no autenticado`);
       return NextResponse.json(
         { success: false, error: "Debes iniciar sesión para realizar un pago.", code: "UNAUTHENTICATED" },
         { status: 401 }
       );
     }
 
+    const { userId, userEmail, userName, client } = user;
+    console.log(`[checkout ${requestId}] Usuario: ${userId}, Plan: ${plan_id}, Price: ${price_id}`);
+
     // ─── VERIFICAR PRICE_ID EN STRIPE ───
     try {
-      await stripe.prices.retrieve(price_id);
+      const priceObj = await stripe.prices.retrieve(price_id);
+      console.log(`[checkout ${requestId}] Price válido en Stripe: ${priceObj.id}, product: ${priceObj.product}`);
     } catch (stripeErr: any) {
       if (stripeErr.code === "resource_missing") {
+        console.error(`[checkout ${requestId}] Price NO EXISTE en Stripe: ${price_id}`);
         return NextResponse.json(
-          { success: false, error: `El price_id no existe en Stripe: ${price_id}`, code: "STRIPE_RESOURCE_MISSING" },
+          { 
+            success: false, 
+            error: `El price_id "${price_id}" no existe en tu cuenta de Stripe.`, 
+            code: "STRIPE_RESOURCE_MISSING",
+            instructions: [
+              "1. Ve a https://dashboard.stripe.com/products",
+              "2. Crea un producto con el precio correspondiente",
+              "3. Copia el price_id (empieza con price_)",
+              `4. Actualiza la tabla subscription_plans en Supabase para plan_id="${plan_id}"`,
+            ]
+          },
           { status: 400 }
         );
       }
@@ -144,8 +185,8 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── PERFIL Y CUSTOMER ───
-    const client = activeClient || getSupabaseAdmin();
     let customerId: string | undefined = undefined;
+    let resolvedUserName = userName;
 
     if (client) {
       const { data: profile } = await client
@@ -154,14 +195,15 @@ export async function POST(req: NextRequest) {
         .eq("id", userId)
         .maybeSingle();
 
-      userName = profile?.full_name || null;
+      resolvedUserName = profile?.full_name || userName;
 
       if (profile?.stripe_customer_id) {
         try {
           await stripe.customers.retrieve(profile.stripe_customer_id);
           customerId = profile.stripe_customer_id;
+          console.log(`[checkout ${requestId}] Customer existente: ${customerId}`);
         } catch {
-          console.warn("[Checkout] Customer inválido, creando nuevo");
+          console.warn(`[checkout ${requestId}] Customer inválido, creando nuevo`);
         }
       }
     }
@@ -169,10 +211,11 @@ export async function POST(req: NextRequest) {
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: userEmail || undefined,
-        name: userName || undefined,
+        name: resolvedUserName || undefined,
         metadata: { supabase_user_id: userId, plan_id: plan_id || "" },
       });
       customerId = customer.id;
+      console.log(`[checkout ${requestId}] Nuevo customer: ${customerId}`);
       if (client) {
         await client.from("profiles").update({ stripe_customer_id: customerId }).eq("id", userId);
       }
@@ -199,12 +242,13 @@ export async function POST(req: NextRequest) {
       locale: "es",
     });
 
+    console.log(`[checkout ${requestId}] Checkout session creada: ${session.id}`);
     return NextResponse.json({ success: true, url: session.url, session_id: session.id });
 
   } catch (err: any) {
-    console.error("[Checkout] Error fatal:", err);
+    console.error(`[checkout ${requestId}] Error fatal:`, err);
     return NextResponse.json(
-      { success: false, error: err.message || "Error interno", code: "INTERNAL_ERROR" },
+      { success: false, error: err.message || "Error interno del servidor", code: "INTERNAL_ERROR" },
       { status: 500 }
     );
   }
