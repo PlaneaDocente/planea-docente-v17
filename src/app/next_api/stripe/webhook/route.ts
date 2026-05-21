@@ -73,13 +73,19 @@ export async function POST(req: Request) {
         const customerId = session.customer as string;
         const subscriptionId = session.subscription as string;
         const metadata = session.metadata || {};
-        const { planId } = metadata;
+
+        // 🔧 CORRECCIÓN: metadata usa "plan_id" (guion bajo), no "planId"
+        const planId = metadata.plan_id || metadata.planId || null;
+
+        console.log("[webhook] checkout.session.completed:", {
+          userId, customerId, subscriptionId, planId, metadata,
+        });
 
         if (!userId || !subscriptionId || !planId) {
           console.error("❌ Webhook: Datos incompletos en checkout.session.completed", {
-            userId, subscriptionId, planId, sessionId: session.id
+            userId, subscriptionId, planId, sessionId: session.id, metadata,
           });
-          return NextResponse.json({ error: "Missing data" }, { status: 200 });
+          return NextResponse.json({ error: "Missing data", details: { userId, subscriptionId, planId } }, { status: 200 });
         }
 
         const trialEnd = new Date();
@@ -100,6 +106,7 @@ export async function POST(req: Request) {
         }
 
         // 3.2 Guardar/actualizar suscripción
+        // 🔧 CORRECCIÓN: Usar created_at y updated_at (no creado_en / actualizado_en)
         const { error: subError } = await supabaseAdmin
           .from("subscriptions")
           .upsert(
@@ -112,19 +119,37 @@ export async function POST(req: Request) {
               fecha_prueba_fin: trialEnd.toISOString(),
               fecha_fin: trialEnd.toISOString(),
               cancelar_al_periodo_fin: false,
-              creado_en: new Date().toISOString(),
-              actualizado_en: new Date().toISOString(),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
             },
             { onConflict: "stripe_subscription_id" }
           );
 
         if (subError) {
           console.error("❌ Webhook: Error guardando suscripción:", subError.message);
+          // Si falla por constraint, intentar insert sin upsert
+          if (subError.code === "23505" || subError.message.includes("duplicate")) {
+            console.log("[webhook] Intentando update en vez de upsert...");
+            const { error: updateErr } = await supabaseAdmin
+              .from("subscriptions")
+              .update({
+                plan_id: planId,
+                stripe_customer_id: customerId,
+                estado: "trialing",
+                fecha_prueba_fin: trialEnd.toISOString(),
+                fecha_fin: trialEnd.toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq("stripe_subscription_id", subscriptionId);
+            if (updateErr) {
+              console.error("❌ Webhook: Update también falló:", updateErr.message);
+            }
+          }
         } else {
           console.log(`✅ Webhook: Usuario ${userId} (${planId}) en prueba hasta ${trialEnd.toISOString()}`);
         }
 
-        // 3.3 LÓGICA DE AFILIADOS (con manejo seguro de null)
+        // 3.3 LÓGICA DE AFILIADOS
         try {
           const customerEmail = session.customer_details?.email || session.customer_email;
 
@@ -196,7 +221,7 @@ export async function POST(req: Request) {
           .update({
             estado: status === "active" ? "active" : status,
             fecha_fin: new Date(currentPeriodEnd * 1000).toISOString(),
-            actualizado_en: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
           })
           .eq("stripe_subscription_id", subscriptionId);
 
@@ -214,7 +239,7 @@ export async function POST(req: Request) {
       }
 
       // ═══════════════════════════════════════════════════════════════════════
-      // SUSCRIPCIÓN ACTUALIZADA → Cambio de plan, cancelación programada, etc.
+      // SUSCRIPCIÓN ACTUALIZADA
       // ═══════════════════════════════════════════════════════════════════════
       case "customer.subscription.updated": {
         const subscription = event.data.object as Stripe.Subscription;
@@ -229,7 +254,7 @@ export async function POST(req: Request) {
             estado: status,
             cancelar_al_periodo_fin: cancelAtPeriodEnd,
             fecha_fin: new Date(currentPeriodEnd * 1000).toISOString(),
-            actualizado_en: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
           })
           .eq("stripe_subscription_id", subscriptionId);
 
@@ -250,7 +275,7 @@ export async function POST(req: Request) {
       }
 
       // ═══════════════════════════════════════════════════════════════════════
-      // SUSCRIPCIÓN ELIMINADA → Cancelación inmediata
+      // SUSCRIPCIÓN ELIMINADA
       // ═══════════════════════════════════════════════════════════════════════
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
@@ -265,7 +290,7 @@ export async function POST(req: Request) {
           .from("subscriptions")
           .update({ 
             estado: "canceled", 
-            actualizado_en: new Date().toISOString() 
+            updated_at: new Date().toISOString() 
           })
           .eq("stripe_subscription_id", subscription.id);
 
@@ -274,7 +299,7 @@ export async function POST(req: Request) {
       }
 
       // ═══════════════════════════════════════════════════════════════════════
-      // PAGO FALLIDO → Marcar como past_due
+      // PAGO FALLIDO
       // ═══════════════════════════════════════════════════════════════════════
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
@@ -288,16 +313,13 @@ export async function POST(req: Request) {
             .from("subscriptions")
             .update({ 
               estado: "past_due", 
-              actualizado_en: new Date().toISOString() 
+              updated_at: new Date().toISOString() 
             })
             .eq("stripe_subscription_id", subscriptionId);
         }
         break;
       }
 
-      // ═══════════════════════════════════════════════════════════════════════
-      // EVENTOS IGNORADOS
-      // ═══════════════════════════════════════════════════════════════════════
       default:
         console.log(`ℹ️ Webhook: Evento ${event.type} ignorado (no requiere acción)`);
     }
