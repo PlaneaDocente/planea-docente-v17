@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -17,9 +17,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 
-type Status = "loading" | "done" | "error";
+type Status = "loading" | "verifying" | "done" | "error";
 
-export default function SuccessClient() {
+function SuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams?.get("session_id");
@@ -27,20 +27,31 @@ export default function SuccessClient() {
   const [status, setStatus] = useState<Status>("loading");
   const [planName, setPlanName] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
-  const [attempts, setAttempts] = useState(0);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [rawUrl, setRawUrl] = useState<string>("");
+
+  // Capturar URL completa para debugging
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setRawUrl(window.location.href);
+    }
+  }, []);
 
   /**
-   * Verifica la sesión de checkout directamente con Stripe
-   * y crea/actualiza la suscripción en Supabase como fallback
-   * si el webhook no funcionó.
+   * Verifica la sesión de pago:
+   * 1. Primero consulta Stripe directamente via API
+   * 2. Si Stripe confirma pago, crea suscripción en Supabase
+   * 3. Si falla, consulta Supabase como fallback
    */
   const verifyPayment = useCallback(async () => {
     if (!sessionId) {
-      setErrorDetail("No se encontró el ID de sesión de pago en la URL.");
-      setStatus("error");
+      // Esperar un momento por si searchParams tarda en hidratarse
+      console.log("[SuccessClient] sessionId no disponible aún, esperando...");
       return;
     }
+
+    setStatus("verifying");
+    setErrorDetail(null);
 
     try {
       // 1. Obtener sesión del usuario
@@ -50,76 +61,41 @@ export default function SuccessClient() {
 
       if (!userId || !token) {
         console.warn("[SuccessClient] No hay sesión activa. Esperando...");
-        // No marcamos error aún, puede que la sesión se esté restaurando
-        if (attempts >= 8) {
-          setErrorDetail("No se detectó una sesión de usuario activa. Intenta iniciar sesión nuevamente.");
-          setStatus("error");
-        }
+        setErrorDetail("No se detectó una sesión de usuario. Intenta iniciar sesión nuevamente.");
+        setStatus("error");
         return;
       }
 
-      // 2. Primero: verificar directamente con Stripe usando nuestra API
-      console.log("[SuccessClient] Verificando sesión con Stripe:", sessionId);
-      const stripeRes = await fetch(`/next_api/stripe/checkout?session_id=${sessionId}`, {
+      console.log("[SuccessClient] Verificando sesión:", sessionId);
+
+      // 2. Verificar directamente con Stripe via API
+      const stripeRes = await fetch(`/next_api/stripe/checkout?session_id=${encodeURIComponent(sessionId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      let stripeSession: any = null;
-      if (stripeRes.ok) {
-        stripeSession = await stripeRes.json();
-        console.log("[SuccessClient] Stripe session:", stripeSession);
+      if (!stripeRes.ok) {
+        const errJson = await stripeRes.json().catch(() => ({}));
+        console.warn("[SuccessClient] Stripe verification failed:", errJson);
+
+        // Fallback: consultar Supabase directamente
+        await checkSupabaseSubscription(userId, token);
+        return;
       }
 
-      // 3. Verificar en Supabase si ya existe la suscripción (webhook funcionó)
-      const { data: existingSub, error: subError } = await supabase
-        .from("subscriptions")
-        .select("id, plan_id, estado, created_at")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const stripeData = await stripeRes.json();
+      console.log("[SuccessClient] Stripe data:", stripeData);
 
-      if (!subError && existingSub?.plan_id) {
-        // El webhook funcionó o ya existe suscripción
-        const { data: plan } = await supabase
-          .from("subscription_plans")
-          .select("nombre")
-          .eq("id", existingSub.plan_id)
-          .maybeSingle();
-
-        setPlanName(plan?.nombre ?? null);
-        setSubscriptionStatus(existingSub.estado ?? null);
-
-        if (["active", "trialing", "past_due"].includes(existingSub.estado)) {
-          setStatus("done");
-          return;
-        }
+      if (!stripeData.success) {
+        setErrorDetail(stripeData.error || "Error verificando con Stripe");
+        setStatus("error");
+        return;
       }
 
-      // 4. Si no existe en Supabase pero Stripe confirma pago, crear manualmente
-      if (stripeSession?.success && stripeSession?.session?.payment_status === "paid") {
-        console.log("[SuccessClient] Pago confirmado por Stripe. Creando suscripción en Supabase...");
+      const session = stripeData.session;
 
-        const planId = stripeSession.session.metadata?.plan_id || "profesional";
-        const stripeSubId = stripeSession.session.subscription;
-        const stripeCustomerId = stripeSession.session.customer;
-
-        // Insertar suscripción manualmente (fallback del webhook)
-        const { error: insertError } = await supabase.from("subscriptions").insert({
-          user_id: userId,
-          plan_id: planId,
-          estado: "active",
-          stripe_subscription_id: stripeSubId,
-          stripe_customer_id: stripeCustomerId,
-          fecha_inicio: new Date().toISOString(),
-        });
-
-        if (insertError) {
-          console.error("[SuccessClient] Error insertando suscripción:", insertError);
-          setErrorDetail("El pago fue exitoso pero hubo un error al activar tu plan. Contacta soporte.");
-          setStatus("error");
-          return;
-        }
+      // 3. Si pago confirmado por Stripe
+      if (session?.payment_status === "paid" || session?.status === "complete") {
+        const planId = session?.plan_id || session?.metadata?.plan_id || "profesional";
 
         // Obtener nombre del plan
         const { data: plan } = await supabase
@@ -128,61 +104,110 @@ export default function SuccessClient() {
           .eq("id", planId)
           .maybeSingle();
 
-        setPlanName(plan?.nombre ?? "Profesional");
+        setPlanName(plan?.nombre || "Profesional");
         setSubscriptionStatus("active");
         setStatus("done");
         return;
       }
 
-      // 5. Si Stripe no confirma aún, seguir esperando (polling)
-      if (stripeSession?.session?.payment_status === "unpaid") {
-        console.log("[SuccessClient] Pago aún no confirmado por Stripe. Reintentando...");
-        if (attempts >= 12) {
-          setErrorDetail("Stripe aún no ha confirmado el pago. Esto puede tardar unos minutos.");
-          setStatus("error");
-        }
+      // 4. Si Stripe no confirma pago aún
+      if (session?.payment_status === "unpaid") {
+        setErrorDetail("Stripe aún no ha confirmado el pago. Esto puede tardar unos minutos.");
+        setStatus("error");
         return;
       }
 
-      // 6. Si no hay info de Stripe y no hay suscripción en BD
-      if (attempts >= 12) {
-        setErrorDetail("No pudimos verificar tu pago. El procesador puede estar tardando. Tu pago fue procesado por Stripe.");
-        setStatus("error");
-      }
+      // Fallback final
+      await checkSupabaseSubscription(userId, token);
+
     } catch (err: any) {
       console.error("[SuccessClient] Error:", err);
-      if (attempts >= 12) {
-        setErrorDetail(err.message || "Error inesperado al verificar el pago.");
-        setStatus("error");
-      }
+      setErrorDetail(err.message || "Error inesperado al verificar el pago.");
+      setStatus("error");
     }
-  }, [sessionId, attempts]);
+  }, [sessionId]);
 
-  // ── Efecto de polling ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (status !== "loading") return;
-
-    verifyPayment();
-
-    const interval = setInterval(() => {
-      setAttempts((prev) => {
-        if (prev >= 12) {
-          clearInterval(interval);
-          return prev;
-        }
-        return prev + 1;
+  /**
+   * Fallback: consultar Supabase directamente
+   */
+  const checkSupabaseSubscription = async (userId: string, token: string) => {
+    try {
+      // Consultar API user-subscription
+      const subRes = await fetch("/api/user-subscription", {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
       });
-    }, 2500);
 
-    return () => clearInterval(interval);
-  }, [status]);
+      if (subRes.ok) {
+        const subJson = await subRes.json();
+        const sub = subJson.data?.subscription;
 
-  // Re-ejecutar cuando attempts cambia
+        if (sub && ["active", "trialing", "past_due"].includes(sub.estado)) {
+          const { data: plan } = await supabase
+            .from("subscription_plans")
+            .select("nombre")
+            .eq("id", sub.plan_id)
+            .maybeSingle();
+
+          setPlanName(plan?.nombre || null);
+          setSubscriptionStatus(sub.estado);
+          setStatus("done");
+          return;
+        }
+      }
+
+      // Consulta directa a Supabase
+      const { data: dbSub } = await supabase
+        .from("subscriptions")
+        .select("plan_id, estado")
+        .eq("user_id", userId)
+        .or("estado.eq.active,estado.eq.trialing")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (dbSub) {
+        const { data: plan } = await supabase
+          .from("subscription_plans")
+          .select("nombre")
+          .eq("id", dbSub.plan_id)
+          .maybeSingle();
+
+        setPlanName(plan?.nombre || null);
+        setSubscriptionStatus(dbSub.estado);
+        setStatus("done");
+        return;
+      }
+
+      setErrorDetail("No se encontró una suscripción activa. El pago puede estar en proceso.");
+      setStatus("error");
+    } catch (e) {
+      console.error("[SuccessClient] Fallback error:", e);
+      setErrorDetail("Error consultando la base de datos.");
+      setStatus("error");
+    }
+  };
+
+  // ── Efecto principal ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (status === "loading" && attempts > 0) {
+    if (status === "loading" && sessionId) {
       verifyPayment();
     }
-  }, [attempts, status, verifyPayment]);
+  }, [sessionId, status, verifyPayment]);
+
+  // Si no hay sessionId después de 3 segundos, mostrar error
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!sessionId && status === "loading") {
+        setErrorDetail("No se encontró el ID de sesión de pago en la URL. Stripe puede no haber redirigido correctamente.");
+        setStatus("error");
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [sessionId, status]);
 
   // ── Redirección automática al dashboard tras confirmación ──────────────────
   useEffect(() => {
@@ -202,7 +227,7 @@ export default function SuccessClient() {
         <Card className="shadow-2xl border-green-200 dark:border-green-800">
           <CardContent className="pt-8 pb-8 text-center space-y-6">
             <AnimatePresence mode="wait">
-              {status === "loading" && (
+              {(status === "loading" || status === "verifying") && (
                 <motion.div
                   key="loading"
                   initial={{ opacity: 0 }}
@@ -213,11 +238,13 @@ export default function SuccessClient() {
                   <Loader2 className="w-12 h-12 text-green-500 animate-spin" />
                   <div className="space-y-1">
                     <p className="text-muted-foreground text-sm font-medium">
-                      Confirmando tu suscripción...
+                      {status === "verifying" ? "Verificando tu pago con Stripe..." : "Cargando información del pago..."}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      Esperando confirmación del procesador de pagos
-                    </p>
+                    {sessionId && (
+                      <p className="text-xs text-muted-foreground font-mono">
+                        Ref: {sessionId.slice(-12)}
+                      </p>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -245,12 +272,17 @@ export default function SuccessClient() {
                     💡 Tu pago fue procesado por Stripe. Si en unos minutos no
                     ves tu plan activo en el dashboard, contacta soporte.
                   </div>
+                  {rawUrl && (
+                    <p className="text-xs text-muted-foreground font-mono break-all">
+                      URL: {rawUrl}
+                    </p>
+                  )}
                   <div className="flex flex-col gap-3">
                     <Button
                       onClick={() => {
-                        setAttempts(0);
                         setStatus("loading");
                         setErrorDetail(null);
+                        verifyPayment();
                       }}
                       variant="outline"
                       className="w-full gap-2"
@@ -343,5 +375,23 @@ export default function SuccessClient() {
         </Card>
       </motion.div>
     </div>
+  );
+}
+
+// Wrapper con Suspense para Next.js App Router
+export default function SuccessClient() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center p-4">
+          <div className="text-center space-y-4">
+            <div className="w-12 h-12 border-4 border-green-200 border-t-green-600 rounded-full animate-spin mx-auto" />
+            <p className="text-green-700 font-medium">Cargando...</p>
+          </div>
+        </div>
+      }
+    >
+      <SuccessContent />
+    </Suspense>
   );
 }
