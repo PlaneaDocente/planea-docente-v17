@@ -2,15 +2,9 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * Cliente Supabase para el NAVEGADOR (browser/client-side).
- *
- * Variables de entorno requeridas en .env.local:
- *   NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
- *   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
- *
- * ⚠️ Este cliente se ejecuta SOLO en el navegador.
- *
- * MEJORA CRÍTICA: Sincroniza la sesión tanto en localStorage como en cookies,
- * para que el middleware de Next.js pueda detectar la sesión server-side.
+ * 
+ * MEJORA: Storage robusto que funciona en modo incógnito y normal.
+ * Fallback: si localStorage no está disponible, usa solo cookies.
  */
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -35,46 +29,89 @@ if (!supabaseUrl.startsWith("https://")) {
   );
 }
 
-/**
- * Storage personalizado que escribe en localStorage Y en cookies.
- * Esto permite que el middleware de Next.js lea la sesión desde cookies
- * mientras el cliente la mantiene en localStorage.
- */
+// ── Helper: verificar si localStorage está disponible ───────────────────────
+function isLocalStorageAvailable(): boolean {
+  try {
+    if (typeof window === "undefined") return false;
+    const test = "__ls_test__";
+    window.localStorage.setItem(test, test);
+    window.localStorage.removeItem(test);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ── Storage personalizado robusto (localStorage + cookies) ─────────────────
 const cookieStorage = {
   getItem: (key: string): string | null => {
     if (typeof window === "undefined") return null;
+
     // 1. Intentar localStorage primero (más rápido)
-    const localValue = localStorage.getItem(key);
-    if (localValue) return localValue;
-    // 2. Fallback a cookie (para compatibilidad con SSR/middleware)
-    const match = document.cookie.match(new RegExp("(^| )" + key.replace(/[-[\]{}()*+?.,\^$|#\s]/g, "\$&") + "=([^;]+)"));
-    return match ? decodeURIComponent(match[2]) : null;
+    if (isLocalStorageAvailable()) {
+      try {
+        const localValue = window.localStorage.getItem(key);
+        if (localValue) return localValue;
+      } catch {
+        // localStorage bloqueado, continuar con cookies
+      }
+    }
+
+    // 2. Fallback a cookie
+    try {
+      const match = document.cookie.match(
+        new RegExp("(^| )" + key.replace(/[-[\]{}()*+?.,\^$|#\s]/g, "\$&") + "=([^;]+)")
+      );
+      return match ? decodeURIComponent(match[2]) : null;
+    } catch {
+      return null;
+    }
   },
+
   setItem: (key: string, value: string): void => {
     if (typeof window === "undefined") return;
+
     // 1. Guardar en localStorage (persistencia principal)
-    localStorage.setItem(key, value);
-    // 2. Sincronizar en cookie (para que el middleware la lea)
-    //    Max-age: 30 días, SameSite=Lax, Secure solo en HTTPS
-    const secureFlag = window.location.protocol === "https:" ? "; Secure" : "";
-    document.cookie = `${key}=${encodeURIComponent(value)}; path=/; max-age=2592000; SameSite=Lax${secureFlag}`;
+    if (isLocalStorageAvailable()) {
+      try {
+        window.localStorage.setItem(key, value);
+      } catch {
+        // localStorage lleno o bloqueado
+      }
+    }
+
+    // 2. Sincronizar en cookie (para SSR/middleware y modo incógnito)
+    try {
+      const secureFlag = window.location.protocol === "https:" ? "; Secure" : "";
+      document.cookie = `${key}=${encodeURIComponent(value)}; path=/; max-age=2592000; SameSite=Lax${secureFlag}`;
+    } catch {
+      // Cookie no se pudo escribir
+    }
   },
+
   removeItem: (key: string): void => {
     if (typeof window === "undefined") return;
+
     // 1. Borrar de localStorage
-    localStorage.removeItem(key);
+    if (isLocalStorageAvailable()) {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        // Ignorar
+      }
+    }
+
     // 2. Borrar cookie
-    document.cookie = `${key}=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT`;
+    try {
+      document.cookie = `${key}=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT`;
+    } catch {
+      // Ignorar
+    }
   },
 };
 
 /**
  * Cliente Supabase global para el navegador.
- *
- * Configuración:
- * - auth: persistencia en localStorage + cookies (dual storage)
- * - detectSessionInUrl: true (procesa automáticamente ?code= de OAuth)
- * - realtime: reconexión automática
  */
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
@@ -83,7 +120,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
     storage: cookieStorage,
     storageKey: "sb-planeadocente-auth-token",
-    flowType: "pkce", // ⭐ CRÍTICO: PKCE evita el "bounce tracking" de Chrome con OAuth
+    flowType: "pkce",
   },
   realtime: {
     params: {
