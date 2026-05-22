@@ -108,6 +108,8 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
   // Ref para evitar múltiples llamadas concurrentes a refreshSubscription
   const isRefreshingRef = useRef(false);
+  // Timeout de seguridad: si algo falla y el ref no se libera, forzar liberación
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // ── Persistencia de UI ───────────────────────────────────────────────────
   const setActiveSection = useCallback((section: ActiveSection) => {
@@ -147,6 +149,15 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     }
     isRefreshingRef.current = true;
 
+    // Timeout de seguridad: si el fetch se cuelga, forzar liberación después de 10s
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+    refreshTimeoutRef.current = setTimeout(() => {
+      console.warn("[AppStore] Forzando liberación de refresh lock por timeout");
+      isRefreshingRef.current = false;
+    }, 10000);
+
     try {
       // Obtener token JWT de la sesión activa
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -169,6 +180,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 segundos max
+
       const res = await fetch(`/api/user-subscription`, {
         method: "GET",
         headers: {
@@ -176,7 +190,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
           "Authorization": `Bearer ${token}`,
         },
         cache: "no-store",
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       const json = await res.json();
 
@@ -228,6 +244,10 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       setTrialDaysLeft(null);
     } finally {
       isRefreshingRef.current = false;
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
     }
   }, []);
 
