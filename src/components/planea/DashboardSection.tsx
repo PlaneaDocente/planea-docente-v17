@@ -30,72 +30,75 @@ interface DashboardStats {
 }
 
 export default function DashboardSection() {
-  const { user, subscription, currentPlan, getPlanDisplayName, isTrial, isPro } = useAppStore();
+  // Leer plan desde AppStore (fallback si profile.is_pro no está actualizado)
+  const { currentPlan, subscription, getPlanDisplayName, isPro: appStoreIsPro } = useAppStore();
+
   const [profile, setProfile] = useState<any>(null);
   const [stats, setStats] = useState<DashboardStats>({
     alumnos: 0, asistenciaHoy: 0, planeaciones: 0,
     actividades: 0, evaluaciones: 0, mensajes: 0, evidencias: 0
   });
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
-      try {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (!authUser) { setLoading(false); return; }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoading(false); return; }
 
-        // Cargar perfil
-        const { data: profileData } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", authUser.id)
-          .single();
-        if (profileData) setProfile(profileData);
+      setUserId(user.id);
 
-        // Cargar estadísticas reales en paralelo
-        const hoy = new Date().toISOString().split("T")[0];
+      // Cargar perfil
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+      if (profileData) setProfile(profileData);
 
-        const [
-          { count: alumnosCount },
-          { count: asistenciaCount },
-          { count: planeacionesCount },
-          { count: evaluacionesCount },
-          { count: evidenciasCount },
-          { count: mensajesCount }
-        ] = await Promise.all([
-          supabase.from("alumnos").select("*", { count: "exact", head: true }).eq("estado", "activo"),
-          supabase.from("asistencia").select("*", { count: "exact", head: true }).eq("fecha", hoy),
-          supabase.from("planeaciones").select("*", { count: "exact", head: true }).eq("maestro_id", authUser.id),
-          supabase.from("evaluaciones").select("*", { count: "exact", head: true }).eq("maestro_id", authUser.id),
-          supabase.from("evidencias").select("*", { count: "exact", head: true }).eq("creado_por", authUser.id),
-          supabase.from("mensajes_padres").select("*", { count: "exact", head: true }).eq("de_maestro_id", authUser.id).eq("leido", false),
-        ]);
+      // Cargar estadísticas reales en paralelo
+      const hoy = new Date().toISOString().split("T")[0];
 
-        setStats({
-          alumnos: alumnosCount || 0,
-          asistenciaHoy: asistenciaCount || 0,
-          planeaciones: planeacionesCount || 0,
-          actividades: 0,
-          evaluaciones: evaluacionesCount || 0,
-          mensajes: mensajesCount || 0,
-          evidencias: evidenciasCount || 0,
-        });
-      } catch (err: any) {
-        console.error("[Dashboard] Error cargando stats:", err?.message);
-      } finally {
-        setLoading(false);
-      }
+      const [
+        { count: alumnosCount },
+        { count: asistenciaCount },
+        { count: planeacionesCount },
+        { count: evaluacionesCount },
+        { count: evidenciasCount },
+        { count: mensajesCount }
+      ] = await Promise.all([
+        supabase.from("alumnos").select("*", { count: "exact", head: true }).eq("estado", "activo"),
+        supabase.from("asistencia").select("*", { count: "exact", head: true }).eq("fecha", hoy),
+        supabase.from("planeaciones").select("*", { count: "exact", head: true }).eq("maestro_id", user.id),
+        supabase.from("evaluaciones").select("*", { count: "exact", head: true }).eq("maestro_id", user.id),
+        supabase.from("evidencias").select("*", { count: "exact", head: true }).eq("creado_por", user.id),
+        supabase.from("mensajes_padres").select("*", { count: "exact", head: true }).eq("de_maestro_id", user.id).eq("leido", false),
+      ]);
+
+      setStats({
+        alumnos: alumnosCount || 0,
+        asistenciaHoy: asistenciaCount || 0,
+        planeaciones: planeacionesCount || 0,
+        actividades: 0, // No hay tabla aún
+        evaluaciones: evaluacionesCount || 0,
+        mensajes: mensajesCount || 0,
+        evidencias: evidenciasCount || 0,
+      });
+
+      setLoading(false);
     };
     fetchData();
   }, []);
 
-  const userName = profile?.nombre_completo || profile?.email?.split('@')[0] || user?.email?.split('@')[0] || "Maestro";
+  const userName = profile?.nombre_completo || profile?.email?.split('@')[0] || "Maestro";
+
+  // Usar AppStore como fuente de verdad para el plan, con fallback a profile.is_pro
+  const isPro = appStoreIsPro() || profile?.is_pro || false;
+  const isTrial = subscription?.estado === "trialing";
   const planName = getPlanDisplayName();
-  const pro = isPro();
-  const trial = isTrial();
 
   const statCards = [
-    { title: "Alumnos Registrados", value: stats.alumnos, subtitle: pro ? planName : "Plan Gratuito", icon: Users, color: "text-blue-600", bgColor: "bg-blue-100 dark:bg-blue-950", trend: stats.alumnos > 0 ? "Registrados" : "Sin alumnos" },
+    { title: "Alumnos Registrados", value: stats.alumnos, subtitle: isPro ? planName : "Plan Gratuito", icon: Users, color: "text-blue-600", bgColor: "bg-blue-100 dark:bg-blue-950", trend: stats.alumnos > 0 ? "Registrados" : "Sin alumnos" },
     { title: "Asistencia Hoy", value: stats.asistenciaHoy, subtitle: "Registros hoy", icon: CalendarCheck, color: "text-emerald-600", bgColor: "bg-emerald-100 dark:bg-emerald-950", trend: stats.asistenciaHoy > 0 ? "Tomada" : "Pendiente" },
     { title: "Planeaciones", value: stats.planeaciones, subtitle: "Guardadas", icon: BookOpen, color: "text-amber-600", bgColor: "bg-amber-100 dark:bg-amber-950" },
     { title: "Evidencias", value: stats.evidencias, subtitle: "Subidas", icon: Camera, color: "text-purple-600", bgColor: "bg-purple-100 dark:bg-purple-950" },
@@ -111,18 +114,11 @@ export default function DashboardSection() {
 
   return (
     <div className="space-y-6">
-      <WelcomeBanner userName={userName} planName={planName} isPro={pro} isTrial={trial} stats={stats} />
+      <WelcomeBanner userName={userName} planName={planName} isPro={isPro} isTrial={isTrial} stats={stats} />
 
-      {!pro && (
+      {!isPro && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-sm">
-          Tu cuenta es gratuita.{" "}
-          <button 
-            onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'suscripcion' }))} 
-            className="underline font-bold"
-          >
-            Actualiza a Pro
-          </button>{" "}
-          para desbloquear todas las funciones.
+          Tu cuenta es gratuita. <button onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'suscripcion' }))} className="underline font-bold">Actualiza a Pro</button> para desbloquear todas las funciones.
         </div>
       )}
 
@@ -134,12 +130,12 @@ export default function DashboardSection() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <QuickActions isPro={pro} />
+          <QuickActions isPro={isPro} />
           <RecentActivity stats={stats} />
         </div>
         <div className="space-y-6">
           <MiniCalendar events={[]} />
-          <AIFeaturesBanner isPro={pro} />
+          <AIFeaturesBanner isPro={isPro} />
         </div>
       </div>
     </div>
