@@ -30,7 +30,7 @@ interface DashboardStats {
 }
 
 export default function DashboardSection() {
-  // Leer plan desde AppStore (fallback a profile.is_pro si no hay datos)
+  // Leer plan desde AppStore (ya no depende solo de profile.is_pro)
   const { currentPlan, getPlanDisplayName, isPro, isTrial, subscription } = useAppStore();
 
   const [profile, setProfile] = useState<any>(null);

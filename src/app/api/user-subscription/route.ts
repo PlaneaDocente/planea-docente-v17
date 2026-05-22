@@ -1,319 +1,153 @@
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
-export const dynamic = 'force-dynamic';
+/* ═══════════════════════════════════════════════════════════
+   CLIENTE ADMIN (Service Role) — Solo servidor, nunca expuesto
+   ═══════════════════════════════════════════════════════════ */
+function getAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// ── Tipos manuales ────────────────────────────────────────────────────────
-interface SubscriptionRecord {
-  id: string;
-  user_id: string;
-  plan_id: string | null;
-  estado: string;
-  fecha_inicio: string | null;
-  fecha_fin: string | null;
-  fecha_prueba_fin: string | null;
-  cancelar_al_periodo_fin: boolean | null;
-  stripe_subscription_id: string | null;
-  stripe_customer_id: string | null;
-  created_at: string | null;
-}
-
-interface PlanRecord {
-  id: string;
-  nombre: string | null;
-  descripcion: string | null;
-  precio_mensual: number | null;
-  precio_anual: number | null;
-  features: string[] | null;
-  stripe_price_id_mensual: string | null;
-  stripe_price_id_anual: string | null;
-  activo: boolean | null;
-}
-
-interface ApiResponse<T = unknown> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  details?: string;
-}
-
-// ── Cliente admin LAZY ───────────────────────────────────────────────────
-function getSupabaseAdmin() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !supabaseServiceKey) {
-    console.warn("[user-subscription] SUPABASE_SERVICE_ROLE_KEY no configurado.");
+  if (!url || !serviceKey) {
+    console.warn("[API/user-subscription] SUPABASE_SERVICE_ROLE_KEY no configurada. Usando cliente normal (puede fallar por RLS).");
     return null;
   }
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
+
+  return createClient(url, serviceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
   });
 }
 
-// ── Cliente con token del usuario (RLS) ──────────────────────────────────
-function getSupabaseUserClient(token: string) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error("[user-subscription] Env vars no configuradas.");
-    return null;
-  }
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-}
-
-function generateRequestId(): string {
-  return Math.random().toString(36).substring(2, 10);
-}
-
-/**
- * GET /api/user-subscription
- * 
- * Prioridad:
- * 1. Header Authorization: Bearer <token>
- * 2. Query param: ?user_id=<uuid>
- * 
- * Para leer subscriptions, usa admin client (bypass RLS) si está disponible.
- * Si no, usa user client (sujeto a RLS).
- */
+/* ═══════════════════════════════════════════════════════════
+   GET /api/user-subscription
+   ═══════════════════════════════════════════════════════════ */
 export async function GET(req: NextRequest) {
-  const requestId = generateRequestId();
-  console.log(`[user-subscription ${requestId}] GET iniciado`);
-
   try {
-    const authHeader = req.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "").trim();
-    const { searchParams } = new URL(req.url);
-    const queryUserId = searchParams.get("user_id");
-
-    let userId: string | null = null;
-    let authMethod: "token" | "query" | "none" = "none";
-
-    // Validar token
-    if (token) {
-      const supabaseUser = getSupabaseUserClient(token);
-      if (supabaseUser) {
-        const { data: userData, error: userError } = await supabaseUser.auth.getUser(token);
-        if (!userError && userData.user) {
-          userId = userData.user.id;
-          authMethod = "token";
-          console.log(`[user-subscription ${requestId}] Token válido: ${userId}`);
-        } else {
-          console.warn(`[user-subscription ${requestId}] Token inválido:`, userError?.message);
-        }
-      }
-    }
-
-    // Fallback: query param (menos seguro, solo si no hay token)
-    if (!userId && queryUserId) {
-      userId = queryUserId;
-      authMethod = "query";
-      console.log(`[user-subscription ${requestId}] Usando query param: ${userId}`);
-    }
-
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "No autenticado" } as ApiResponse,
-        { status: 401 }
-      );
-    }
-
-    // ── CONSULTAR SUSCRIPCIÓN ──
-    // ESTRATEGIA: Usar admin client si está disponible (bypass RLS)
-    // Si no, usar user client (sujeto a RLS - puede devolver vacío)
-    let client = getSupabaseAdmin();
-    let usingAdmin = true;
-
-    if (!client) {
-      console.warn(`[user-subscription ${requestId}] Admin no disponible. Intentando user client (puede fallar por RLS).`);
-      if (token) {
-        client = getSupabaseUserClient(token);
-        usingAdmin = false;
-      }
-    }
-
-    if (!client) {
-      return NextResponse.json(
-        { success: false, error: "No se pudo conectar a la base de datos. Configura SUPABASE_SERVICE_ROLE_KEY en Vercel." } as ApiResponse,
-        { status: 500 }
-      );
-    }
-
-    console.log(`[user-subscription ${requestId}] Consultando subscriptions para user: ${userId} (admin: ${usingAdmin})`);
-
-    const { data: subscriptions, error: subError } = await client
-      .from("subscriptions")
-      .select("id, user_id, plan_id, estado, fecha_inicio, fecha_fin, fecha_prueba_fin, cancelar_al_periodo_fin, stripe_subscription_id, stripe_customer_id, created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if (subError) {
-      console.error(`[user-subscription ${requestId}] Error:`, subError);
-      return NextResponse.json(
-        { success: false, error: "Error consultando BD", details: subError.message } as ApiResponse,
-        { status: 500 }
-      );
-    }
-
-    const subscription: SubscriptionRecord | null = (subscriptions && subscriptions.length > 0) ? subscriptions[0] as SubscriptionRecord : null;
-
-    // Si no hay resultados y usamos user client, probablemente es RLS
-    if (!subscription && !usingAdmin) {
-      console.warn(`[user-subscription ${requestId}] Sin resultados con user client. Posible problema de RLS. Agrega SUPABASE_SERVICE_ROLE_KEY a Vercel.`);
-    }
-
-    // Consultar plan
-    let plan: PlanRecord | null = null;
-    if (subscription?.plan_id) {
-      const { data: planData, error: planError } = await client
-        .from("subscription_plans")
-        .select("id, nombre, descripcion, precio_mensual, precio_anual, features, stripe_price_id_mensual, stripe_price_id_anual, activo")
-        .eq("id", subscription.plan_id)
-        .maybeSingle();
-
-      if (!planError) {
-        plan = planData as PlanRecord | null;
-      }
-    }
-
-    if (!subscription) {
-      console.log(`[user-subscription ${requestId}] No hay suscripción para user: ${userId}`);
-      return NextResponse.json(
-        { success: true, data: { subscription: null, plan: null } } as ApiResponse,
-        { status: 200 }
-      );
-    }
-
-    console.log(`[user-subscription ${requestId}] Encontrada: ${subscription.plan_id}, estado: ${subscription.estado}`);
-    return NextResponse.json(
-      { success: true, data: { subscription, plan } } as ApiResponse,
-      { status: 200 }
-    );
-
-  } catch (err) {
-    console.error(`[user-subscription ${requestId}] Error inesperado:`, err);
-    return NextResponse.json(
-      { success: false, error: "Error interno", details: err instanceof Error ? err.message : "Unknown" } as ApiResponse,
-      { status: 500 }
-    );
-  }
-}
-
-/**
- * POST /api/user-subscription
- */
-export async function POST(req: NextRequest) {
-  const requestId = generateRequestId();
-  console.log(`[user-subscription ${requestId}] POST iniciado`);
-
-  try {
-    const body = await req.json();
-    const { plan_id, estado, fecha_inicio, fecha_prueba_fin, fecha_fin } = body;
-
-    const authHeader = req.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "").trim();
+    // 1. Extraer token del header Authorization
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.replace(/^Bearer\s+/i, "");
 
     if (!token) {
       return NextResponse.json(
-        { success: false, error: "No autenticado" } as ApiResponse,
+        { success: false, error: "No autorizado: falta token" },
         { status: 401 }
       );
     }
 
-    const supabaseUser = getSupabaseUserClient(token);
-    if (!supabaseUser) {
-      return NextResponse.json(
-        { success: false, error: "Supabase no configurado" } as ApiResponse,
-        { status: 500 }
-      );
-    }
+    // 2. Crear cliente con token de usuario para validar quién es
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const userClient = createClient(url, anonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+      global: {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    });
 
-    const { data: userData, error: userError } = await supabaseUser.auth.getUser(token);
+    // 3. Obtener user_id del token
+    const { data: userData, error: userError } = await userClient.auth.getUser(token);
     if (userError || !userData.user) {
       return NextResponse.json(
-        { success: false, error: "Token inválido" } as ApiResponse,
+        { success: false, error: "Token inválido o expirado" },
         { status: 401 }
       );
     }
-
     const userId = userData.user.id;
 
-    if (!plan_id) {
-      return NextResponse.json(
-        { success: false, error: "plan_id requerido" } as ApiResponse,
-        { status: 400 }
-      );
+    // 4. Buscar suscripción con ADMIN client (bypass RLS)
+    const admin = getAdminClient();
+    let subscription = null;
+    let plan = null;
+
+    if (admin) {
+      // Usar service role: leer directamente sin RLS
+      const { data: subData, error: subError } = await admin
+        .from("subscriptions")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!subError && subData) {
+        subscription = subData;
+      } else {
+        console.log("[API/user-subscription] Admin query result:", subError?.message || "No subscription found");
+      }
+    } else {
+      // Fallback: intentar con cliente de usuario (puede fallar por RLS)
+      const { data: subData, error: subError } = await userClient
+        .from("subscriptions")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!subError && subData) {
+        subscription = subData;
+      }
     }
 
-    // Usar admin si disponible
-    const client = getSupabaseAdmin() || supabaseUser;
-
-    // Validar plan
-    const { data: planExists } = await client
-      .from("subscription_plans")
-      .select("id")
-      .eq("id", plan_id)
-      .eq("activo", true)
-      .maybeSingle();
-
-    if (!planExists) {
-      return NextResponse.json(
-        { success: false, error: "Plan inválido" } as ApiResponse,
-        { status: 400 }
-      );
+    // 5. Si hay suscripción, buscar el plan asociado
+    if (subscription?.plan_id) {
+      const planClient = admin || userClient;
+      const { data: planData } = await planClient
+        .from("subscription_plans")
+        .select("*")
+        .eq("id", subscription.plan_id)
+        .single();
+      if (planData) plan = planData;
     }
 
-    // Verificar duplicados
-    const { data: existingSub } = await client
-      .from("subscriptions")
-      .select("id, estado")
-      .eq("user_id", userId)
-      .in("estado", ["active", "trialing"])
-      .maybeSingle();
+    // 6. Fallback: si no hay suscripción pero profile.is_pro = true
+    if (!subscription) {
+      const profileClient = admin || userClient;
+      const { data: profile } = await profileClient
+        .from("profiles")
+        .select("is_pro, plan_actual")
+        .eq("id", userId)
+        .single();
 
-    if (existingSub) {
-      return NextResponse.json(
-        { success: true, data: existingSub, warning: "Ya tiene suscripción activa" } as ApiResponse,
-        { status: 200 }
-      );
+      if (profile?.is_pro) {
+        subscription = {
+          plan_id: profile.plan_actual || "profesional",
+          estado: "active",
+          user_id: userId,
+        };
+        // Buscar plan
+        const planClient = admin || userClient;
+        const { data: planData } = await planClient
+          .from("subscription_plans")
+          .select("*")
+          .eq("id", subscription.plan_id)
+          .single();
+        if (planData) plan = planData;
+      }
     }
 
-    const estadosPermitidos = ["trialing", "active", "past_due", "canceled", "unpaid", "incomplete", "incomplete_expired"];
-    const estadoFinal = estadosPermitidos.includes(estado) ? estado : "trialing";
+    // 7. Responder
+    return NextResponse.json({
+      success: true,
+      data: {
+        subscription,
+        plan,
+        user_id: userId,
+      },
+    });
 
-    const insertData: Record<string, unknown> = {
-      user_id: userId,
-      plan_id,
-      estado: estadoFinal,
-    };
-    if (fecha_inicio) insertData.fecha_inicio = fecha_inicio;
-    if (fecha_prueba_fin) insertData.fecha_prueba_fin = fecha_prueba_fin;
-    if (fecha_fin) insertData.fecha_fin = fecha_fin;
-
-    const { data, error } = await client
-      .from("subscriptions")
-      .insert([insertData as any])
-      .select()
-      .maybeSingle();
-
-    if (error) {
-      return NextResponse.json(
-        { success: false, error: "Error creando suscripción", details: error.message } as ApiResponse,
-        { status: 500 }
-      );
-    }
-
+  } catch (err: any) {
+    console.error("[API/user-subscription] Error:", err?.message);
     return NextResponse.json(
-      { success: true, data } as ApiResponse,
-      { status: 201 }
-    );
-
-  } catch (err) {
-    return NextResponse.json(
-      { success: false, error: "Error interno", details: err instanceof Error ? err.message : "Unknown" } as ApiResponse,
+      { success: false, error: err?.message || "Error interno del servidor" },
       { status: 500 }
     );
   }

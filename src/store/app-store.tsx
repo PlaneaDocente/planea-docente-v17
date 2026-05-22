@@ -1,202 +1,210 @@
 "use client";
 
-import React from "react";
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import { persist } from "zustand/middleware";
+import { useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
-import { useRef, useCallback, useEffect } from "react";
 
-// ============================================================
-// TIPOS — PlaneaDocente V17 NEM
-// ============================================================
-
+/* ═══════════════════════════════════════════════════════════
+   TIPOS
+   ═══════════════════════════════════════════════════════════ */
 export type PlanType = "gratuito" | "basico" | "profesional" | "institucional";
 
 export interface SubscriptionData {
   id?: string;
   plan_id: PlanType;
-  estado: "active" | "trialing" | "canceled" | "past_due" | "inactive";
-  fecha_inicio?: string;
-  fecha_fin?: string;
-  fecha_prueba_fin?: string;
-  stripe_subscription_id?: string | null;
+  estado: string;
+  fecha_inicio?: string | null;
+  fecha_fin?: string | null;
+  fecha_prueba_fin?: string | null;
   stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
   cancelar_al_periodo_fin?: boolean;
-  plan_nombre?: string;
-  plan_descripcion?: string;
-  plan_precio_mensual?: number;
-  plan_precio_anual?: number;
-  plan_limites?: Record<string, number>;
 }
 
 export interface AppState {
+  /* Auth */
   user: User | null;
-  currentUser: User | null;
   session: Session | null;
-  isLoading: boolean;
+  currentUser: User | null;
   isAuthenticated: boolean;
-  subscription: SubscriptionData | null;
-  isRefreshingSubscription: boolean;
-  subscriptionError: string | null;
-  currentPlan: PlanType;
-  sidebarOpen: boolean;
-  activeSection: string;
+  isLoading: boolean;
+  authError: string | null;
 
-  setUser: (user: User | null, session: Session | null) => void;
-  setCurrentUser: (user: User | null) => void;
+  /* UI */
+  activeSection: string;
+  sidebarOpen: boolean;
+
+  /* Subscription */
+  currentPlan: PlanType;
+  subscription: SubscriptionData | null;
+  subscriptionError: string | null;
+  isRefreshingSubscription: boolean;
+
+  /* Actions */
+  setUser: (user: User | null) => void;
   setSession: (session: Session | null) => void;
-  logout: () => Promise<void>;
-  setSubscription: (sub: SubscriptionData | null) => void;
-  refreshSubscription: () => Promise<void>;
-  clearSubscriptionError: () => void;
-  canUseFeature: (feature: string) => boolean;
-  getPlanDisplayName: () => string;
-  isTrial: () => boolean;
-  isPro: () => boolean;
-  toggleSidebar: () => void;
-  setSidebarOpen: (open: boolean) => void;
+  setCurrentUser: (user: User | null) => void;
   setActiveSection: (section: string) => void;
+  setSidebarOpen: (open: boolean) => void;
+  toggleSidebar: () => void;
+  logout: () => Promise<void>;
+  refreshSubscription: () => Promise<void>;
+  initSession: () => Promise<void>;
+
+  /* Helpers */
+  getPlanDisplayName: () => string;
+  isPro: () => boolean;
+  isTrial: () => boolean;
+  canUseFeature: (featurePlan: PlanType) => boolean;
 }
 
-// ============================================================
-// NORMALIZACIÓN DE TEXTO — NEM compatible
-// ============================================================
+/* ═══════════════════════════════════════════════════════════
+   PLAN LIMITS (NEM Compatible)
+   ═══════════════════════════════════════════════════════════ */
+export const PLAN_LIMITS: Record<PlanType, { maxAlumnos: number; maxGrupos: number; iaGeneraciones: number; label: string }> = {
+  gratuito: { maxAlumnos: 15, maxGrupos: 1, iaGeneraciones: 5, label: "Gratuito" },
+  basico:   { maxAlumnos: 35, maxGrupos: 3, iaGeneraciones: 50, label: "Básico" },
+  profesional: { maxAlumnos: 9999, maxGrupos: 10, iaGeneraciones: 500, label: "Profesional" },
+  institucional: { maxAlumnos: 99999, maxGrupos: 999, iaGeneraciones: 9999, label: "Institucional" },
+};
 
-function normalizeText(text: string | null | undefined): string {
-  if (!text) return "";
+function normalizeText(text: string): string {
   return text
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-// ============================================================
-// LÍMITES POR PLAN — Nueva Escuela Mexicana
-// ============================================================
-
-const PLAN_LIMITS: Record<PlanType, Record<string, number | boolean>> = {
-  gratuito: {
-    alumnos: 30, grupos: 3, planeaciones: 5, evaluaciones: 5,
-    evidencias_mb: 50, reportes: false, asistencia_avanzada: false,
-    padres_app: false, ia_educativa: false, exportar_pdf: false, soporte: false,
-  },
-  basico: {
-    alumnos: 100, grupos: 10, planeaciones: 50, evaluaciones: 50,
-    evidencias_mb: 500, reportes: true, asistencia_avanzada: true,
-    padres_app: true, ia_educativa: false, exportar_pdf: true, soporte: true,
-  },
-  profesional: {
-    alumnos: 500, grupos: 50, planeaciones: 9999, evaluaciones: 9999,
-    evidencias_mb: 2048, reportes: true, asistencia_avanzada: true,
-    padres_app: true, ia_educativa: true, exportar_pdf: true, soporte: true,
-  },
-  institucional: {
-    alumnos: 99999, grupos: 99999, planeaciones: 99999, evaluaciones: 99999,
-    evidencias_mb: 10240, reportes: true, asistencia_avanzada: true,
-    padres_app: true, ia_educativa: true, exportar_pdf: true, soporte: true,
-  },
-};
-
-const PLAN_NAMES: Record<PlanType, string> = {
-  gratuito: "Plan Gratuito",
-  basico: "Plan Básico",
-  profesional: "Plan Profesional",
-  institucional: "Plan Institucional",
-};
-
-// ============================================================
-// STORE ZUSTAND
-// ============================================================
-
+/* ═══════════════════════════════════════════════════════════
+   STORE
+   ═══════════════════════════════════════════════════════════ */
 export const useAppStore = create<AppState>()(
   persist(
-    (set: (fn: (state: AppState) => Partial<AppState>) => void, get: () => AppState) => ({
+    (set, get) => ({
+      /* Estado inicial */
       user: null,
-      currentUser: null,
       session: null,
-      isLoading: true,
+      currentUser: null,
       isAuthenticated: false,
-      subscription: null,
-      isRefreshingSubscription: false,
-      subscriptionError: null,
-      currentPlan: "gratuito",
+      isLoading: true,
+      authError: null,
+      activeSection: "inicio",
       sidebarOpen: true,
-      activeSection: "dashboard",
+      currentPlan: "gratuito",
+      subscription: null,
+      subscriptionError: null,
+      isRefreshingSubscription: false,
 
-      setUser: (user: User | null, session: Session | null) => {
-        set((state: AppState) => ({
-          ...state, user, currentUser: user, session,
-          isAuthenticated: !!user, isLoading: false,
-        }));
-      },
-
-      setCurrentUser: (user: User | null) => {
-        set((state: AppState) => ({
-          ...state, currentUser: user, user,
+      /* ── Auth ── */
+      setUser: (user: User | null) => {
+        set({
+          user,
+          currentUser: user,
           isAuthenticated: !!user,
-        }));
+        });
       },
 
       setSession: (session: Session | null) => {
-        set((state: AppState) => ({ ...state, session }));
+        set({ session });
       },
 
+      setCurrentUser: (user: User | null) => {
+        set({
+          currentUser: user,
+          user,
+          isAuthenticated: !!user,
+        });
+      },
+
+      /* ── UI ── */
+      setActiveSection: (section: string) => set({ activeSection: section }),
+
+      setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
+
+      toggleSidebar: () => set((state: AppState) => ({ sidebarOpen: !state.sidebarOpen })),
+
+      /* ── Logout ── */
       logout: async () => {
-        try { await supabase.auth.signOut(); } catch (e: any) {}
-        set((state: AppState) => ({
-          ...state, user: null, currentUser: null, session: null,
-          isAuthenticated: false, subscription: null,
-          currentPlan: "gratuito", isLoading: false,
-        }));
+        await supabase.auth.signOut();
+        set({
+          user: null,
+          session: null,
+          currentUser: null,
+          isAuthenticated: false,
+          currentPlan: "gratuito",
+          subscription: null,
+          authError: null,
+        });
         if (typeof window !== "undefined") {
           localStorage.removeItem("pd_auth_refreshing");
           localStorage.removeItem("pd_auth_refresh_timeout");
         }
       },
 
-      setSubscription: (sub: SubscriptionData | null) => {
-        const plan: PlanType = (sub?.plan_id as PlanType) || "gratuito";
-        set((state: AppState) => ({
-          ...state, subscription: sub, currentPlan: plan, subscriptionError: null,
-        }));
+      /* ── Init Session ── */
+      initSession: async () => {
+        try {
+          const { data, error } = await supabase.auth.getSession();
+          if (error) throw error;
+
+          if (data.session) {
+            set({
+              session: data.session,
+              user: data.session.user,
+              currentUser: data.session.user,
+              isAuthenticated: true,
+              isLoading: false,
+            });
+            // Refrescar suscripción en background (sin await para no bloquear)
+            get().refreshSubscription();
+          } else {
+            set({ isLoading: false });
+          }
+        } catch (err: any) {
+          console.error("[AppStore] initSession error:", err?.message);
+          set({ isLoading: false, authError: err?.message || "Error de autenticación" });
+        }
       },
 
-      clearSubscriptionError: () => {
-        set((state: AppState) => ({ ...state, subscriptionError: null }));
-      },
-
+      /* ── Refresh Subscription (ANTI-ATASCO) ── */
       refreshSubscription: async () => {
         const state = get();
 
-        if (!state.session?.access_token) {
-          console.log("[AppStore] No hay token");
-          set((s: AppState) => ({ ...s, currentPlan: "gratuito", subscription: null }));
+        // 1. Validar token
+        const token = state.session?.access_token;
+        if (!token) {
+          console.log("[AppStore] No hay token, plan gratuito");
+          set({ currentPlan: "gratuito", subscription: null, isRefreshingSubscription: false });
           return;
         }
 
-        // Anti-atasco
-        if (typeof window !== "undefined") {
-          const isRefreshing = localStorage.getItem("pd_auth_refreshing");
-          const timeoutStr = localStorage.getItem("pd_auth_refresh_timeout");
-          if (isRefreshing === "1" && timeoutStr) {
-            const timeout = parseInt(timeoutStr, 10);
-            if (Date.now() - timeout < 10000) {
-              console.log("[AppStore] Refresh en progreso, skipping...");
-              return;
-            }
-            localStorage.removeItem("pd_auth_refreshing");
-            localStorage.removeItem("pd_auth_refresh_timeout");
-          }
-          localStorage.setItem("pd_auth_refreshing", "1");
-          localStorage.setItem("pd_auth_refresh_timeout", Date.now().toString());
+        // 2. Anti-atasco: si ya está en progreso, no repetir
+        if (state.isRefreshingSubscription) {
+          console.log("[AppStore] Refresh ya en progreso, skipping");
+          return;
         }
 
-        set((s: AppState) => ({ ...s, isRefreshingSubscription: true, subscriptionError: null }));
+        // 3. Marcar inicio
+        set({ isRefreshingSubscription: true, subscriptionError: null });
+
+        // 4. Timeout de seguridad: SIEMPRE liberar después de 10s
+        let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
+        const releaseLock = () => {
+          if (safetyTimeout) clearTimeout(safetyTimeout);
+          set({ isRefreshingSubscription: false });
+        };
+        safetyTimeout = setTimeout(() => {
+          console.warn("[AppStore] Safety timeout: liberando lock");
+          set({ isRefreshingSubscription: false });
+        }, 10000);
 
         try {
-          const token = state.session.access_token;
-          console.log("[AppStore] Fetching subscription via API...");
+          console.log("[AppStore] Fetching subscription...");
+
+          const controller = new AbortController();
+          const fetchTimeout = setTimeout(() => controller.abort(), 8000);
 
           const res = await fetch("/api/user-subscription", {
             method: "GET",
@@ -204,209 +212,164 @@ export const useAppStore = create<AppState>()(
               "Content-Type": "application/json",
               Authorization: `Bearer ${token}`,
             },
+            signal: controller.signal,
           });
+          clearTimeout(fetchTimeout);
 
           if (!res.ok) {
             const errText = await res.text().catch(() => "Error");
             console.error(`[AppStore] API error ${res.status}:`, errText);
-            throw new Error(`API HTTP ${res.status}`);
+            if (res.status === 401) {
+              set({ currentPlan: "gratuito", subscription: null });
+            }
+            // No cambiar plan en error de red para no perder estado
+            return;
           }
 
           const data = await res.json();
-          console.log("[AppStore] API response:", data?.data?.subscription?.plan_id || "none");
+          console.log("[AppStore] Subscription response:", data);
 
-          let subscription: SubscriptionData | null = null;
-
-          if (data?.data?.subscription) {
-            subscription = {
-              ...data.data.subscription,
-              plan_id: normalizeText(data.data.subscription.plan_id) as PlanType || "gratuito",
-            };
-          }
-
-          // ── FALLBACK: Si API devuelve null, consultar Supabase directamente ──
-          if (!subscription && state.user?.id) {
-            console.log("[AppStore] Fallback: consultando Supabase directamente...");
-            try {
-              const { data: subData, error: subError } = await supabase
-                .from("subscriptions")
-                .select("id, user_id, plan_id, estado, fecha_inicio, fecha_fin, fecha_prueba_fin, stripe_subscription_id, stripe_customer_id, created_at")
-                .eq("user_id", state.user.id)
-                .order("created_at", { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-              if (!subError && subData) {
-                console.log("[AppStore] Fallback encontró suscripción directamente:", subData.plan_id);
-                subscription = {
-                  ...subData,
-                  plan_id: normalizeText(subData.plan_id) as PlanType || "gratuito",
-                };
-              } else if (subError) {
-                console.warn("[AppStore] Fallback error:", subError.message);
-              }
-            } catch (fallbackErr: any) {
-              console.warn("[AppStore] Fallback exception:", fallbackErr?.message);
-            }
-          }
-
-          if (subscription) {
-            set((s: AppState) => ({
-              ...s, subscription, currentPlan: subscription.plan_id, subscriptionError: null,
-            }));
+          if (data?.success && data?.data?.subscription) {
+            const sub = data.data.subscription as SubscriptionData;
+            const planId = (sub.plan_id as PlanType) || "gratuito";
+            set({
+              subscription: sub,
+              currentPlan: planId,
+              subscriptionError: null,
+            });
+            console.log("[AppStore] Plan detectado:", planId);
           } else {
-            set((s: AppState) => ({ ...s, subscription: null, currentPlan: "gratuito", subscriptionError: null }));
+            // Fallback: si la API dice null pero tenemos profile.is_pro
+            console.log("[AppStore] No subscription from API, checking profile...");
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("is_pro, plan_actual")
+              .eq("id", state.user?.id || "")
+              .single();
+
+            if (profile?.is_pro) {
+              const plan = (profile.plan_actual as PlanType) || "profesional";
+              set({
+                currentPlan: plan,
+                subscription: {
+                  plan_id: plan,
+                  estado: "active",
+                },
+              });
+              console.log("[AppStore] Plan from profile:", plan);
+            } else {
+              set({ subscription: null, currentPlan: "gratuito" });
+            }
           }
         } catch (err: any) {
           console.error("[AppStore] Error:", err?.message);
-          set((s: AppState) => ({ ...s, subscriptionError: err?.message || "Error", subscription: null }));
+          set({ subscriptionError: err?.message || "Error de conexión" });
         } finally {
-          set((s: AppState) => ({ ...s, isRefreshingSubscription: false }));
-          if (typeof window !== "undefined") {
-            localStorage.removeItem("pd_auth_refreshing");
-            localStorage.removeItem("pd_auth_refresh_timeout");
-          }
+          releaseLock();
         }
       },
 
-      canUseFeature: (feature: string) => {
+      /* ── Helpers ── */
+      getPlanDisplayName: () => {
         const plan = get().currentPlan;
-        const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.gratuito;
-        const value = limits[feature];
-        if (typeof value === "boolean") return value;
-        if (typeof value === "number") return value > 0;
-        return false;
+        return PLAN_LIMITS[plan]?.label || "Gratuito";
       },
 
-      getPlanDisplayName: () => PLAN_NAMES[get().currentPlan] || "Plan Gratuito",
-      isTrial: () => get().subscription?.estado === "trialing",
       isPro: () => {
         const plan = get().currentPlan;
-        return plan === "profesional" || plan === "institucional";
+        return plan === "profesional" || plan === "institucional" || get().subscription?.estado === "trialing";
       },
-      toggleSidebar: () => set((state: AppState) => ({ ...state, sidebarOpen: !state.sidebarOpen })),
-      setSidebarOpen: (open: boolean) => set((state: AppState) => ({ ...state, sidebarOpen: open })),
-      setActiveSection: (section: string) => set((state: AppState) => ({ ...state, activeSection: section })),
+
+      isTrial: () => {
+        return get().subscription?.estado === "trialing";
+      },
+
+      canUseFeature: (featurePlan: PlanType) => {
+        const current = normalizeText(get().currentPlan);
+        const required = normalizeText(featurePlan);
+        const hierarchy: Record<string, number> = {
+          gratuito: 0,
+          basico: 1,
+          profesional: 2,
+          institucional: 3,
+        };
+        return hierarchy[current] >= hierarchy[required];
+      },
     }),
     {
-      name: "planeadocente-store-v17",
-      storage: createJSONStorage(() => localStorage),
+      name: "app-store-pd-v17",
       partialize: (state: AppState) => ({
-        sidebarOpen: state.sidebarOpen,
         activeSection: state.activeSection,
+        sidebarOpen: state.sidebarOpen,
+        currentPlan: state.currentPlan,
       }),
     }
   )
 );
 
-// ============================================================
-// HOOK: useAuthInit
-// ============================================================
-
-export function useAuthInit() {
-  const { setUser } = useAppStore();
-  const initDoneRef = useRef(false);
-
-  const initSession = useCallback(async () => {
-    if (initDoneRef.current) return;
-    initDoneRef.current = true;
-
-    try {
-      console.log("[AuthInit] Iniciando...");
-      const { data, error } = await supabase.auth.getSession();
-
-      if (error) {
-        console.error("[AuthInit] Error:", error.message);
-        setUser(null, null);
-        return;
-      }
-
-      if (data.session?.user) {
-        console.log("[AuthInit] Sesión:", data.session.user.email);
-        setUser(data.session.user, data.session);
-        setTimeout(() => {
-          useAppStore.getState().refreshSubscription();
-        }, 500);
-      } else {
-        console.log("[AuthInit] Sin sesión");
-        setUser(null, null);
-      }
-    } catch (err: any) {
-      console.error("[AuthInit] Error crítico:", err?.message);
-      setUser(null, null);
-    }
-  }, [setUser]);
+/* ═══════════════════════════════════════════════════════════
+   PROVIDER (para layout.tsx)
+   ═══════════════════════════════════════════════════════════ */
+export function AppStoreProvider({ children }: { children: React.ReactNode }) {
+  const initSession = useAppStore((s) => s.initSession);
+  const refreshSubscription = useAppStore((s) => s.refreshSubscription);
+  const user = useAppStore((s) => s.user);
+  const session = useAppStore((s) => s.session);
 
   useEffect(() => {
     initSession();
+  }, [initSession]);
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      async (event: string, session: Session | null) => {
-        console.log("[AuthInit] Evento:", event);
-
-        if (event === "SIGNED_IN") {
-          if (session?.user) {
-            setUser(session.user, session);
-            setTimeout(() => {
-              useAppStore.getState().refreshSubscription();
-            }, 300);
-          }
-        } else if (event === "SIGNED_OUT") {
-          setUser(null, null);
-        } else if (event === "TOKEN_REFRESHED") {
-          if (session) {
-            useAppStore.setState({ session } as Partial<AppState>);
-          }
-        } else if (event === "USER_UPDATED") {
-          if (session?.user) setUser(session.user, session);
-        }
+  // Escuchar cambios de auth de Supabase
+  useEffect(() => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("[AppStore] Auth event:", event);
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        useAppStore.setState({
+          session,
+          user: session?.user ?? null,
+          currentUser: session?.user ?? null,
+          isAuthenticated: !!session,
+        });
+        // Refrescar suscripción después de un breve delay
+        setTimeout(() => refreshSubscription(), 500);
       }
-    );
-
+      if (event === "SIGNED_OUT") {
+        useAppStore.setState({
+          user: null,
+          session: null,
+          currentUser: null,
+          isAuthenticated: false,
+          currentPlan: "gratuito",
+          subscription: null,
+        });
+      }
+    });
     return () => {
-      listener?.subscription?.unsubscribe();
+      listener.subscription.unsubscribe();
     };
-  }, [initSession, setUser]);
-}
+  }, [refreshSubscription]);
 
-// ============================================================
-// PROVIDER
-// ============================================================
+  // Refrescar suscripción cuando cambia el usuario (una sola vez por sesión)
+  const lastUserRef = useRef<string | null>(null);
+  useEffect(() => {
+    const userId = user?.id;
+    const token = session?.access_token;
+    if (userId && token && lastUserRef.current !== userId) {
+      lastUserRef.current = userId;
+      refreshSubscription();
+    }
+  }, [user?.id, session?.access_token, refreshSubscription]);
 
-export function AppStoreProvider({ children }: { children: React.ReactNode }) {
-  useAuthInit();
   return <>{children}</>;
 }
 
-// ============================================================
-// HOOK: useSubscriptionRefresh
-// ============================================================
-
-export function useSubscriptionRefresh() {
-  const { refreshSubscription, isRefreshingSubscription } = useAppStore();
-
-  const forceRefresh = useCallback(async () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("pd_auth_refreshing");
-      localStorage.removeItem("pd_auth_refresh_timeout");
-    }
-    await refreshSubscription();
-  }, [refreshSubscription]);
-
-  return { refreshSubscription: forceRefresh, isRefreshingSubscription };
+/* ═══════════════════════════════════════════════════════════
+   HOOKS AUXILIARES
+   ═══════════════════════════════════════════════════════════ */
+export function useAuthInit() {
+  const initSession = useAppStore((s) => s.initSession);
+  useEffect(() => {
+    initSession();
+  }, [initSession]);
 }
-
-// ============================================================
-// SELECTORES
-// ============================================================
-
-export const selectUser = (state: AppState) => state.user;
-export const selectIsAuthenticated = (state: AppState) => state.isAuthenticated;
-export const selectIsLoading = (state: AppState) => state.isLoading;
-export const selectSubscription = (state: AppState) => state.subscription;
-export const selectCurrentPlan = (state: AppState) => state.currentPlan;
-export const selectCanUseFeature = (state: AppState) => state.canUseFeature;
-export const selectIsPro = (state: AppState) => state.isPro();
-export const selectPlanName = (state: AppState) => state.getPlanDisplayName();
-
-export default useAppStore;

@@ -1,69 +1,84 @@
-import { supabaseAdmin } from "@/integrations/supabase/server";
-import { seedDefaultPlans } from "@/lib/supabase-subscriptions";
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
-export const dynamic = 'force-dynamic';
+function getAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return null;
+  return createClient(url, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
 
-/**
- * GET /api/subscription-plans
- * Devuelve todos los planes de suscripción activos ordenados por campo "orden".
- * El seeding de planes por defecto es no-bloqueante: si falla, no impide
- * que el usuario reciba los planes existentes en la base de datos.
- */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    // ── Seeding no-bloqueante ──────────────────────────────────────────────
-    // En arquitectura serverless (Vercel) cada cold start puede ejecutar esto.
-    // seedDefaultPlans debe ser idempotente (no duplicar si ya existen).
-    // Se envuelve en catch para que un fallo de seeding NO rompa la ruta.
-    seedDefaultPlans().catch((seedErr) => {
-      console.warn("[subscription-plans] Seeding warning (non-blocking):", seedErr);
+    const admin = getAdminClient();
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const client = admin || createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     });
 
-    // ── Consulta de planes activos ─────────────────────────────────────────
-    const { data, error } = await supabaseAdmin
+    const { data: plans, error } = await client
       .from("subscription_plans")
       .select("*")
       .eq("activo", true)
       .order("orden", { ascending: true });
 
     if (error) {
-      console.error("[subscription-plans] Error fetching plans:", error);
-      return Response.json(
-        {
-          success: false,
-          error: "Failed to fetch subscription plans",
-          details: error.message,
-        },
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      console.error("[API/subscription-plans] Error:", error.message);
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // ── Respuesta con cache para reducir carga en DB ─────────────────────────
-    return Response.json(
-      { success: true, data: data ?? [] },
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+    // Si no hay planes en BD, devolver fallback para que la UI no se rompa
+    if (!plans || plans.length === 0) {
+      const fallback = [
+        {
+          id: "basico",
+          nombre: "Básico",
+          precio_centavos: 9900,
+          precio_centavos_anual: 99000,
+          moneda: "mxn",
+          intervalo: "month",
+          dias_prueba: 15,
+          descripcion: "Ideal para maestros que inician",
+          caracteristicas: ["Hasta 35 alumnos", "Registro de asistencia", "Planeaciones básicas", "Reportes simples"],
+          activo: true,
+          orden: 1,
         },
-      }
-    );
-  } catch (err) {
-    console.error("[subscription-plans] Unexpected route error:", err);
-    return Response.json(
-      {
-        success: false,
-        error: "Internal server error",
-        details: err instanceof Error ? err.message : "Unknown error",
-      },
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
-    );
+        {
+          id: "profesional",
+          nombre: "Profesional",
+          precio_centavos: 19900,
+          precio_centavos_anual: 199000,
+          moneda: "mxn",
+          intervalo: "month",
+          dias_prueba: 15,
+          descripcion: "Para maestros avanzados",
+          caracteristicas: ["Alumnos ilimitados", "Herramientas IA", "Generación de imágenes", "Planeaciones IA", "Reportes avanzados"],
+          activo: true,
+          orden: 2,
+        },
+        {
+          id: "institucional",
+          nombre: "Institucional",
+          precio_centavos: 49900,
+          precio_centavos_anual: 499000,
+          moneda: "mxn",
+          intervalo: "month",
+          dias_prueba: 15,
+          descripcion: "Para escuelas",
+          caracteristicas: ["Múltiples maestros", "Panel de director", "Reportes institucionales", "Soporte 24/7"],
+          activo: true,
+          orden: 3,
+        },
+      ];
+      return NextResponse.json({ success: true, data: fallback, source: "fallback" });
+    }
+
+    return NextResponse.json({ success: true, data: plans, source: "database" });
+  } catch (err: any) {
+    console.error("[API/subscription-plans] Error:", err?.message);
+    return NextResponse.json({ success: false, error: err?.message }, { status: 500 });
   }
 }
