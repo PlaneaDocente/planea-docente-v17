@@ -30,8 +30,8 @@ interface DashboardStats {
 }
 
 export default function DashboardSection() {
-  // Leer plan desde AppStore (fallback si profile.is_pro no está actualizado)
-  const { currentPlan, subscription, getPlanDisplayName, isPro: appStoreIsPro } = useAppStore();
+  // Leer plan desde AppStore (fallback a profile.is_pro si no hay datos)
+  const { currentPlan, getPlanDisplayName, isPro, isTrial, subscription } = useAppStore();
 
   const [profile, setProfile] = useState<any>(null);
   const [stats, setStats] = useState<DashboardStats>({
@@ -79,7 +79,7 @@ export default function DashboardSection() {
         alumnos: alumnosCount || 0,
         asistenciaHoy: asistenciaCount || 0,
         planeaciones: planeacionesCount || 0,
-        actividades: 0, // No hay tabla aún
+        actividades: 0,
         evaluaciones: evaluacionesCount || 0,
         mensajes: mensajesCount || 0,
         evidencias: evidenciasCount || 0,
@@ -92,13 +92,14 @@ export default function DashboardSection() {
 
   const userName = profile?.nombre_completo || profile?.email?.split('@')[0] || "Maestro";
 
-  // Usar AppStore como fuente de verdad para el plan, con fallback a profile.is_pro
-  const isPro = appStoreIsPro() || profile?.is_pro || false;
-  const isTrial = subscription?.estado === "trialing";
+  // Prioridad: AppStore subscription > profile.is_pro > false
   const planName = getPlanDisplayName();
+  const pro = isPro() || profile?.is_pro || false;
+  const trial = isTrial();
+  const isGratuito = currentPlan === "gratuito" && !pro;
 
   const statCards = [
-    { title: "Alumnos Registrados", value: stats.alumnos, subtitle: isPro ? planName : "Plan Gratuito", icon: Users, color: "text-blue-600", bgColor: "bg-blue-100 dark:bg-blue-950", trend: stats.alumnos > 0 ? "Registrados" : "Sin alumnos" },
+    { title: "Alumnos Registrados", value: stats.alumnos, subtitle: pro ? planName : "Plan Gratuito", icon: Users, color: "text-blue-600", bgColor: "bg-blue-100 dark:bg-blue-950", trend: stats.alumnos > 0 ? "Registrados" : "Sin alumnos" },
     { title: "Asistencia Hoy", value: stats.asistenciaHoy, subtitle: "Registros hoy", icon: CalendarCheck, color: "text-emerald-600", bgColor: "bg-emerald-100 dark:bg-emerald-950", trend: stats.asistenciaHoy > 0 ? "Tomada" : "Pendiente" },
     { title: "Planeaciones", value: stats.planeaciones, subtitle: "Guardadas", icon: BookOpen, color: "text-amber-600", bgColor: "bg-amber-100 dark:bg-amber-950" },
     { title: "Evidencias", value: stats.evidencias, subtitle: "Subidas", icon: Camera, color: "text-purple-600", bgColor: "bg-purple-100 dark:bg-purple-950" },
@@ -114,11 +115,18 @@ export default function DashboardSection() {
 
   return (
     <div className="space-y-6">
-      <WelcomeBanner userName={userName} planName={planName} isPro={isPro} isTrial={isTrial} stats={stats} />
+      <WelcomeBanner userName={userName} planName={planName} isPro={pro} isTrial={trial} stats={stats} />
 
-      {!isPro && (
+      {isGratuito && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-sm">
-          Tu cuenta es gratuita. <button onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'suscripcion' }))} className="underline font-bold">Actualiza a Pro</button> para desbloquear todas las funciones.
+          Tu cuenta es gratuita.{" "}
+          <button 
+            onClick={() => window.dispatchEvent(new CustomEvent('navigate', { detail: 'suscripcion' }))} 
+            className="underline font-bold"
+          >
+            Actualiza a Pro
+          </button>{" "}
+          para desbloquear todas las funciones.
         </div>
       )}
 
@@ -130,12 +138,12 @@ export default function DashboardSection() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <QuickActions isPro={isPro} />
+          <QuickActions isPro={pro} />
           <RecentActivity stats={stats} />
         </div>
         <div className="space-y-6">
           <MiniCalendar events={[]} />
-          <AIFeaturesBanner isPro={isPro} />
+          <AIFeaturesBanner isPro={pro} />
         </div>
       </div>
     </div>
