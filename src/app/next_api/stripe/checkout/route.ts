@@ -4,17 +4,17 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = 'force-dynamic';
 
-// ── Stripe LAZY (no inicializa si no hay key) ──────────────
+// ── Stripe LAZY ──
 function getStripe(): Stripe | null {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) {
     console.warn("[checkout] STRIPE_SECRET_KEY no configurado.");
     return null;
   }
-  return new Stripe(key, { typescript: true });
+  return new Stripe(key, { apiVersion: "2026-04-22.dahlia" });
 }
 
-// ── Supabase Admin LAZY ──────────────
+// ── Supabase Admin ──
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -27,181 +27,36 @@ function getSupabaseAdmin() {
   });
 }
 
-// ── Supabase con token del usuario (RLS) ──────────────
-function getSupabaseUserClient(token: string) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-}
-
-// ── Helper: validar formato de price_id ──────────────
+// ── Validar price_id ──
 function isValidPriceFormat(priceId: string): boolean {
   if (!priceId || typeof priceId !== "string") return false;
   const trimmed = priceId.trim();
   if (!trimmed.startsWith("price_")) return false;
   if (trimmed.length < 10) return false;
-  const lower = trimmed.toLowerCase();
-  const invalidPatterns = ["xxx", "yyy", "zzz", "placeholder", "test_", "demo", "example", "sample", "fake"];
-  if (invalidPatterns.some(p => lower.includes(p))) return false;
   return true;
 }
 
-// ── Helper: obtener usuario autenticado ──────────────
-async function getAuthenticatedUser(req: NextRequest): Promise<{ userId: string; userEmail: string | null; userName: string | null; client: any } | null> {
-  // Estrategia 1: Header Authorization con token del usuario
+// ── Obtener usuario autenticado ──
+async function getAuthenticatedUser(req: NextRequest): Promise<{ userId: string; userEmail: string | null; userName: string | null } | null> {
   const authHeader = req.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.replace("Bearer ", "").trim();
-    const supabaseUser = getSupabaseUserClient(token);
-    if (supabaseUser) {
-      const { data: userData, error: authErr } = await supabaseUser.auth.getUser(token);
-      if (!authErr && userData?.user) {
-        return { userId: userData.user.id, userEmail: userData.user.email || null, userName: userData.user.user_metadata?.full_name || null, client: supabaseUser };
-      }
-    }
-  }
-
-  // Estrategia 2: Session cookie (admin fallback)
-  const supabaseAdmin = getSupabaseAdmin();
-  if (supabaseAdmin) {
-    try {
-      const { data: sessionData } = await supabaseAdmin.auth.getSession();
-      if (sessionData?.session?.user) {
-        return { userId: sessionData.session.user.id, userEmail: sessionData.session.user.email || null, userName: sessionData.session.user.user_metadata?.full_name || null, client: supabaseAdmin };
-      }
-    } catch { /* silent */ }
-  }
-
-  return null;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// GET /next_api/stripe/checkout
-// 
-// Modo 1 (sin session_id): Diagnóstico de configuración
-// Modo 2 (con ?session_id=xxx): Verificar sesión de pago con Stripe
-// ═══════════════════════════════════════════════════════════════
-export async function GET(req: NextRequest) {
-  const requestId = Math.random().toString(36).substring(2, 10);
-  console.log(`[checkout ${requestId}] GET iniciado`);
-
-  try {
-    const { searchParams } = new URL(req.url);
-    const sessionId = searchParams.get("session_id");
-
-    // ─── MODO 1: Diagnóstico de configuración (sin session_id) ───
-    if (!sessionId) {
-      const stripe = getStripe();
-      const user = await getAuthenticatedUser(req);
-
-      const diagnostics = {
-        stripe_configured: !!stripe,
-        stripe_secret_key_present: !!process.env.STRIPE_SECRET_KEY,
-        supabase_url_present: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-        supabase_anon_key_present: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-        supabase_service_role_present: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-        user_authenticated: !!user,
-        user_id: user?.userId || null,
-        timestamp: new Date().toISOString(),
-      };
-
-      return NextResponse.json({ success: true, diagnostics }, { status: 200 });
-    }
-
-    // ─── MODO 2: Verificar sesión de pago con Stripe ───
-    console.log(`[checkout ${requestId}] Verificando sesión: ${sessionId}`);
-
-    const stripe = getStripe();
-    if (!stripe) {
-      return NextResponse.json(
-        { success: false, error: "Stripe no está configurado", code: "STRIPE_NOT_CONFIGURED" },
-        { status: 503 }
-      );
-    }
-
-    const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: "Debes iniciar sesión", code: "UNAUTHENTICATED" },
-        { status: 401 }
-      );
-    }
-
-    // Recuperar sesión de Stripe con detalles expandidos
-    const session = await stripe.checkout.sessions.retrieve(sessionId, {
-      expand: ["subscription", "customer"],
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseUser = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
     });
-
-    console.log(`[checkout ${requestId}] Stripe session: payment_status=${session.payment_status}, status=${session.status}`);
-
-    // Si el pago fue exitoso, crear/actualizar suscripción en Supabase
-    if (session.payment_status === "paid" && session.status === "complete") {
-      const planId = session.metadata?.plan_id || "profesional";
-      const stripeSubId = typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
-      const stripeCustomerId = typeof session.customer === "string" ? session.customer : session.customer?.id;
-
-      // Verificar si ya existe suscripción
-      const { data: existingSub } = await user.client
-        .from("subscriptions")
-        .select("id")
-        .eq("user_id", user.userId)
-        .eq("stripe_subscription_id", stripeSubId)
-        .maybeSingle();
-
-      if (!existingSub) {
-        console.log(`[checkout ${requestId}] Creando suscripción en Supabase...`);
-        const { error: insertError } = await user.client.from("subscriptions").insert({
-          user_id: user.userId,
-          plan_id: planId,
-          estado: "active",
-          stripe_subscription_id: stripeSubId,
-          stripe_customer_id: stripeCustomerId,
-          fecha_inicio: new Date().toISOString(),
-        });
-
-        if (insertError) {
-          console.error(`[checkout ${requestId}] Error insertando:`, insertError);
-        } else {
-          console.log(`[checkout ${requestId}] Suscripción creada exitosamente`);
-        }
-      } else {
-        console.log(`[checkout ${requestId}] Suscripción ya existe`);
-      }
+    const { data: userData, error: authErr } = await supabaseUser.auth.getUser(token);
+    if (!authErr && userData?.user) {
+      return { 
+        userId: userData.user.id, 
+        userEmail: userData.user.email || null, 
+        userName: userData.user.user_metadata?.full_name || null 
+      };
     }
-
-    return NextResponse.json({
-      success: true,
-      session: {
-        id: session.id,
-        payment_status: session.payment_status,
-        status: session.status,
-        amount_total: session.amount_total,
-        currency: session.currency,
-        customer_email: session.customer_details?.email,
-        metadata: session.metadata,
-        subscription_id: typeof session.subscription === "string" ? session.subscription : session.subscription?.id,
-        customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id,
-        plan_id: session.metadata?.plan_id,
-      },
-    }, { status: 200 });
-
-  } catch (err: any) {
-    console.error(`[checkout ${requestId}] GET error:`, err);
-    if (err.code === "resource_missing") {
-      return NextResponse.json(
-        { success: false, error: "Sesión no encontrada en Stripe", code: "SESSION_NOT_FOUND" },
-        { status: 404 }
-      );
-    }
-    return NextResponse.json(
-      { success: false, error: err.message || "Error interno" },
-      { status: 500 }
-    );
   }
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -217,7 +72,6 @@ export async function POST(req: NextRequest) {
 
     // ─── VALIDAR PRICE_ID ───
     if (!price_id || typeof price_id !== "string") {
-      console.warn(`[checkout ${requestId}] price_id faltante o inválido`);
       return NextResponse.json(
         { success: false, error: "price_id es requerido", code: "MISSING_PRICE_ID" },
         { status: 400 }
@@ -225,9 +79,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (!isValidPriceFormat(price_id)) {
-      console.warn(`[checkout ${requestId}] price_id con formato inválido: ${price_id}`);
       return NextResponse.json(
-        { success: false, error: `El price_id tiene formato inválido: "${price_id}". Debe empezar con "price_" y no contener palabras de prueba.`, code: "INVALID_PRICE_ID_FORMAT" },
+        { success: false, error: `El price_id "${price_id}" tiene formato inválido. Debe empezar con "price_"`, code: "INVALID_PRICE_ID" },
         { status: 400 }
       );
     }
@@ -235,9 +88,8 @@ export async function POST(req: NextRequest) {
     // ─── STRIPE CONFIGURADO? ───
     const stripe = getStripe();
     if (!stripe) {
-      console.error(`[checkout ${requestId}] STRIPE_SECRET_KEY no configurado`);
       return NextResponse.json(
-        { success: false, error: "Stripe no está configurado en el servidor. Agrega STRIPE_SECRET_KEY en Vercel.", code: "STRIPE_NOT_CONFIGURED" },
+        { success: false, error: "Stripe no está configurado. Agrega STRIPE_SECRET_KEY en Vercel.", code: "STRIPE_NOT_CONFIGURED" },
         { status: 503 }
       );
     }
@@ -245,47 +97,36 @@ export async function POST(req: NextRequest) {
     // ─── AUTENTICACIÓN ───
     const user = await getAuthenticatedUser(req);
     if (!user) {
-      console.warn(`[checkout ${requestId}] Usuario no autenticado`);
       return NextResponse.json(
         { success: false, error: "Debes iniciar sesión para realizar un pago.", code: "UNAUTHENTICATED" },
         { status: 401 }
       );
     }
 
-    const { userId, userEmail, userName, client } = user;
+    const { userId, userEmail, userName } = user;
     console.log(`[checkout ${requestId}] Usuario: ${userId}, Plan: ${plan_id}, Price: ${price_id}`);
 
     // ─── VERIFICAR PRICE_ID EN STRIPE ───
     try {
       const priceObj = await stripe.prices.retrieve(price_id);
-      console.log(`[checkout ${requestId}] Price válido en Stripe: ${priceObj.id}, product: ${priceObj.product}`);
+      console.log(`[checkout ${requestId}] Price válido: ${priceObj.id}`);
     } catch (stripeErr: any) {
       if (stripeErr.code === "resource_missing") {
-        console.error(`[checkout ${requestId}] Price NO EXISTE en Stripe: ${price_id}`);
         return NextResponse.json(
-          { 
-            success: false, 
-            error: `El price_id "${price_id}" no existe en tu cuenta de Stripe.`, 
-            code: "STRIPE_RESOURCE_MISSING",
-            instructions: [
-              "1. Ve a https://dashboard.stripe.com/products",
-              "2. Crea un producto con el precio correspondiente",
-              "3. Copia el price_id (empieza con price_)",
-              `4. Actualiza la tabla subscription_plans en Supabase para plan_id="${plan_id}"`,
-            ]
-          },
+          { success: false, error: `El price_id "${price_id}" no existe en Stripe.`, code: "STRIPE_RESOURCE_MISSING" },
           { status: 400 }
         );
       }
       throw stripeErr;
     }
 
-    // ─── PERFIL Y CUSTOMER ───
-    let customerId: string | undefined = undefined;
+    // ─── CUSTOMER EN STRIPE ───
+    const supabaseAdmin = getSupabaseAdmin();
+    let customerId: string | undefined;
     let resolvedUserName = userName;
 
-    if (client) {
-      const { data: profile } = await client
+    if (supabaseAdmin) {
+      const { data: profile } = await supabaseAdmin
         .from("profiles")
         .select("stripe_customer_id, full_name")
         .eq("id", userId)
@@ -297,7 +138,6 @@ export async function POST(req: NextRequest) {
         try {
           await stripe.customers.retrieve(profile.stripe_customer_id);
           customerId = profile.stripe_customer_id;
-          console.log(`[checkout ${requestId}] Customer existente: ${customerId}`);
         } catch {
           console.warn(`[checkout ${requestId}] Customer inválido, creando nuevo`);
         }
@@ -311,9 +151,8 @@ export async function POST(req: NextRequest) {
         metadata: { supabase_user_id: userId, plan_id: plan_id || "" },
       });
       customerId = customer.id;
-      console.log(`[checkout ${requestId}] Nuevo customer: ${customerId}`);
-      if (client) {
-        await client.from("profiles").update({ stripe_customer_id: customerId }).eq("id", userId);
+      if (supabaseAdmin) {
+        await supabaseAdmin.from("profiles").update({ stripe_customer_id: customerId }).eq("id", userId);
       }
     }
 
@@ -338,13 +177,62 @@ export async function POST(req: NextRequest) {
       locale: "es",
     });
 
-    console.log(`[checkout ${requestId}] Checkout session creada: ${session.id}`);
+    console.log(`[checkout ${requestId}] Checkout creado: ${session.id}`);
     return NextResponse.json({ success: true, url: session.url, session_id: session.id });
 
   } catch (err: any) {
-    console.error(`[checkout ${requestId}] Error fatal:`, err);
+    console.error(`[checkout ${requestId}] Error:`, err);
     return NextResponse.json(
-      { success: false, error: err.message || "Error interno del servidor", code: "INTERNAL_ERROR" },
+      { success: false, error: err.message || "Error interno", code: "INTERNAL_ERROR" },
+      { status: 500 }
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GET /next_api/stripe/checkout — Verificar sesión
+// ═══════════════════════════════════════════════════════════════
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const sessionId = searchParams.get("session_id");
+
+    if (!sessionId) {
+      return NextResponse.json(
+        { success: false, error: "session_id requerido" },
+        { status: 400 }
+      );
+    }
+
+    const stripe = getStripe();
+    if (!stripe) {
+      return NextResponse.json(
+        { success: false, error: "Stripe no configurado" },
+        { status: 503 }
+      );
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["subscription", "customer"],
+    });
+
+    return NextResponse.json({
+      success: true,
+      session: {
+        id: session.id,
+        payment_status: session.payment_status,
+        status: session.status,
+        amount_total: session.amount_total,
+        currency: session.currency,
+        customer_email: session.customer_details?.email,
+        plan_id: session.metadata?.plan_id,
+      },
+    });
+
+  } catch (err: any) {
+    console.error("[checkout GET] Error:", err);
+    return NextResponse.json(
+      { success: false, error: err.message },
       { status: 500 }
     );
   }
