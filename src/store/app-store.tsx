@@ -32,7 +32,7 @@ export interface AppState {
   isLoading: boolean;
   authError: string | null;
 
-  /* UI */
+  /* UI / Navegación */
   activeSection: string;
   sidebarOpen: boolean;
 
@@ -49,6 +49,7 @@ export interface AppState {
   setActiveSection: (section: string) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
+  setSidebarOpenFn: (open: boolean) => void; // alias para compatibilidad
   logout: () => Promise<void>;
   refreshSubscription: () => Promise<void>;
   initSession: () => Promise<void>;
@@ -71,10 +72,7 @@ export const PLAN_LIMITS: Record<PlanType, { maxAlumnos: number; maxGrupos: numb
 };
 
 function normalizeText(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+  return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -99,11 +97,7 @@ export const useAppStore = create<AppState>()(
 
       /* ── Auth ── */
       setUser: (user: User | null) => {
-        set({
-          user,
-          currentUser: user,
-          isAuthenticated: !!user,
-        });
+        set({ user, currentUser: user, isAuthenticated: !!user });
       },
 
       setSession: (session: Session | null) => {
@@ -111,31 +105,30 @@ export const useAppStore = create<AppState>()(
       },
 
       setCurrentUser: (user: User | null) => {
-        set({
-          currentUser: user,
-          user,
-          isAuthenticated: !!user,
-        });
+        set({ currentUser: user, user, isAuthenticated: !!user });
       },
 
-      /* ── UI ── */
-      setActiveSection: (section: string) => set({ activeSection: section }),
+      /* ── UI / Navegación ── */
+      setActiveSection: (section: string) => {
+        console.log("[AppStore] Navegando a:", section);
+        set({ activeSection: section });
+        // Emitir evento para que el layout escuche
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("navigate", { detail: section }));
+        }
+      },
 
       setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
-
+      setSidebarOpenFn: (open: boolean) => set({ sidebarOpen: open }), // alias
       toggleSidebar: () => set((state: AppState) => ({ sidebarOpen: !state.sidebarOpen })),
 
       /* ── Logout ── */
       logout: async () => {
         await supabase.auth.signOut();
         set({
-          user: null,
-          session: null,
-          currentUser: null,
-          isAuthenticated: false,
-          currentPlan: "gratuito",
-          subscription: null,
-          authError: null,
+          user: null, session: null, currentUser: null,
+          isAuthenticated: false, currentPlan: "gratuito",
+          subscription: null, authError: null, activeSection: "inicio",
         });
         if (typeof window !== "undefined") {
           localStorage.removeItem("pd_auth_refreshing");
@@ -151,14 +144,11 @@ export const useAppStore = create<AppState>()(
 
           if (data.session) {
             set({
-              session: data.session,
-              user: data.session.user,
-              currentUser: data.session.user,
-              isAuthenticated: true,
-              isLoading: false,
+              session: data.session, user: data.session.user,
+              currentUser: data.session.user, isAuthenticated: true, isLoading: false,
             });
-            // Refrescar suscripción en background (sin await para no bloquear)
-            get().refreshSubscription();
+            // Refrescar suscripción en background
+            setTimeout(() => get().refreshSubscription(), 500);
           } else {
             set({ isLoading: false });
           }
@@ -168,43 +158,33 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      /* ── Refresh Subscription (ANTI-ATASCO) ── */
+      /* ── Refresh Subscription (ANTI-ATASCO DEFINITIVO) ── */
       refreshSubscription: async () => {
         const state = get();
-
-        // 1. Validar token
         const token = state.session?.access_token;
+
         if (!token) {
-          console.log("[AppStore] No hay token, plan gratuito");
           set({ currentPlan: "gratuito", subscription: null, isRefreshingSubscription: false });
           return;
         }
 
-        // 2. Anti-atasco: si ya está en progreso, no repetir
+        // Anti-atasco: si ya está en progreso, no repetir
         if (state.isRefreshingSubscription) {
           console.log("[AppStore] Refresh ya en progreso, skipping");
           return;
         }
 
-        // 3. Marcar inicio
         set({ isRefreshingSubscription: true, subscriptionError: null });
 
-        // 4. Timeout de seguridad: SIEMPRE liberar después de 10s
-        let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
-        const releaseLock = () => {
-          if (safetyTimeout) clearTimeout(safetyTimeout);
-          set({ isRefreshingSubscription: false });
-        };
-        safetyTimeout = setTimeout(() => {
+        // Timeout de seguridad: SIEMPRE liberar después de 8s
+        const safetyTimeout = setTimeout(() => {
           console.warn("[AppStore] Safety timeout: liberando lock");
           set({ isRefreshingSubscription: false });
-        }, 10000);
+        }, 8000);
 
         try {
-          console.log("[AppStore] Fetching subscription...");
-
           const controller = new AbortController();
-          const fetchTimeout = setTimeout(() => controller.abort(), 8000);
+          const fetchTimeout = setTimeout(() => controller.abort(), 6000);
 
           const res = await fetch("/api/user-subscription", {
             method: "GET",
@@ -217,30 +197,21 @@ export const useAppStore = create<AppState>()(
           clearTimeout(fetchTimeout);
 
           if (!res.ok) {
-            const errText = await res.text().catch(() => "Error");
-            console.error(`[AppStore] API error ${res.status}:`, errText);
             if (res.status === 401) {
               set({ currentPlan: "gratuito", subscription: null });
             }
-            // No cambiar plan en error de red para no perder estado
             return;
           }
 
           const data = await res.json();
-          console.log("[AppStore] Subscription response:", data);
 
           if (data?.success && data?.data?.subscription) {
             const sub = data.data.subscription as SubscriptionData;
             const planId = (sub.plan_id as PlanType) || "gratuito";
-            set({
-              subscription: sub,
-              currentPlan: planId,
-              subscriptionError: null,
-            });
+            set({ subscription: sub, currentPlan: planId, subscriptionError: null });
             console.log("[AppStore] Plan detectado:", planId);
           } else {
-            // Fallback: si la API dice null pero tenemos profile.is_pro
-            console.log("[AppStore] No subscription from API, checking profile...");
+            // Fallback: verificar profile.is_pro
             const { data: profile } = await supabase
               .from("profiles")
               .select("is_pro, plan_actual")
@@ -249,14 +220,7 @@ export const useAppStore = create<AppState>()(
 
             if (profile?.is_pro) {
               const plan = (profile.plan_actual as PlanType) || "profesional";
-              set({
-                currentPlan: plan,
-                subscription: {
-                  plan_id: plan,
-                  estado: "active",
-                },
-              });
-              console.log("[AppStore] Plan from profile:", plan);
+              set({ currentPlan: plan, subscription: { plan_id: plan, estado: "active" } });
             } else {
               set({ subscription: null, currentPlan: "gratuito" });
             }
@@ -265,7 +229,8 @@ export const useAppStore = create<AppState>()(
           console.error("[AppStore] Error:", err?.message);
           set({ subscriptionError: err?.message || "Error de conexión" });
         } finally {
-          releaseLock();
+          clearTimeout(safetyTimeout);
+          set({ isRefreshingSubscription: false });
         }
       },
 
@@ -280,19 +245,12 @@ export const useAppStore = create<AppState>()(
         return plan === "profesional" || plan === "institucional" || get().subscription?.estado === "trialing";
       },
 
-      isTrial: () => {
-        return get().subscription?.estado === "trialing";
-      },
+      isTrial: () => get().subscription?.estado === "trialing",
 
       canUseFeature: (featurePlan: PlanType) => {
         const current = normalizeText(get().currentPlan);
         const required = normalizeText(featurePlan);
-        const hierarchy: Record<string, number> = {
-          gratuito: 0,
-          basico: 1,
-          profesional: 2,
-          institucional: 3,
-        };
+        const hierarchy: Record<string, number> = { gratuito: 0, basico: 1, profesional: 2, institucional: 3 };
         return hierarchy[current] >= hierarchy[required];
       },
     }),
@@ -320,37 +278,28 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     initSession();
   }, [initSession]);
 
-  // Escuchar cambios de auth de Supabase
+  // Escuchar cambios de auth
   useEffect(() => {
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       console.log("[AppStore] Auth event:", event);
       if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
         useAppStore.setState({
-          session,
-          user: session?.user ?? null,
-          currentUser: session?.user ?? null,
-          isAuthenticated: !!session,
+          session, user: session?.user ?? null,
+          currentUser: session?.user ?? null, isAuthenticated: !!session,
         });
-        // Refrescar suscripción después de un breve delay
         setTimeout(() => refreshSubscription(), 500);
       }
       if (event === "SIGNED_OUT") {
         useAppStore.setState({
-          user: null,
-          session: null,
-          currentUser: null,
-          isAuthenticated: false,
-          currentPlan: "gratuito",
-          subscription: null,
+          user: null, session: null, currentUser: null,
+          isAuthenticated: false, currentPlan: "gratuito", subscription: null,
         });
       }
     });
-    return () => {
-      listener.subscription.unsubscribe();
-    };
+    return () => { listener.subscription.unsubscribe(); };
   }, [refreshSubscription]);
 
-  // Refrescar suscripción cuando cambia el usuario (una sola vez por sesión)
+  // Refrescar suscripción cuando cambia el usuario
   const lastUserRef = useRef<string | null>(null);
   useEffect(() => {
     const userId = user?.id;
@@ -364,12 +313,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   HOOKS AUXILIARES
-   ═══════════════════════════════════════════════════════════ */
 export function useAuthInit() {
   const initSession = useAppStore((s) => s.initSession);
-  useEffect(() => {
-    initSession();
-  }, [initSession]);
+  useEffect(() => { initSession(); }, [initSession]);
 }
