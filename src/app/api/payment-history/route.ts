@@ -1,22 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/integrations/supabase/server";
 
-
-// Escudo obligatorio para evitar el error en Vercel Build
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  // Si estamos en fase de construcción y no hay URL, respondemos algo vacío pero exitoso
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
     return NextResponse.json({ message: "Build mode skipping" }, { status: 200 });
   }
 
   try {
+    // ✅ Obtener token y validar usuario
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.replace(/^Bearer\s+/i, "");
+    if (!token) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    // Crear cliente para verificar el token
+    const { createClient } = await import("@supabase/supabase-js");
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const userClient = createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const { data: { user }, error: userError } = await userClient.auth.getUser(token);
+    if (userError || !user) {
+      return NextResponse.json({ error: "Token inválido" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get("userId");
 
     if (!userId) {
       return NextResponse.json({ error: "User ID is required" }, { status: 400 });
+    }
+
+    // ✅ Verificar que el usuario solo vea su propio historial
+    if (userId !== user.id) {
+      return NextResponse.json({ error: "Acceso denegado" }, { status: 403 });
     }
 
     const { data, error } = await supabaseAdmin

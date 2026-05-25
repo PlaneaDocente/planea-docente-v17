@@ -7,10 +7,8 @@ export const dynamic = 'force-dynamic';
 // ── Stripe LAZY ──
 function getStripe(): Stripe | null {
   const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) {
-    console.warn("[checkout] STRIPE_SECRET_KEY no configurado.");
-    return null;
-  }
+  if (!key) return null;
+  // ✅ Versión estable actual
   return new Stripe(key, { apiVersion: "2026-04-22.dahlia" });
 }
 

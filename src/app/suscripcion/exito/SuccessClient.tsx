@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -27,95 +27,69 @@ export default function SuccessClient() {
   const [status, setStatus] = useState<Status>("loading");
   const [planName, setPlanName] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
-  const [attempts, setAttempts] = useState(0);
+  const retryCountRef = useRef(0);
+  const timeoutRef = useRef<NodeJS.Timeout>();
 
-  /**
-   * Consulta la suscripción del usuario en Supabase.
-   * Incluye polling: reintenta cada 2.5s hasta 30s para dar tiempo
-   * al webhook de Stripe de actualizar la base de datos.
-   */
-  const confirmSession = useCallback(async () => {
+  // ✅ Polling con backoff exponencial (1s, 1.5s, 2.25s, ... hasta 10s)
+  const pollSubscription = useCallback(async () => {
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData?.session?.user?.id;
-
-      if (!userId) {
-        console.warn("[SuccessClient] No active session found");
-        setStatus("error");
-        return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        throw new Error("No active session");
       }
 
-      // Consultar la suscripción más reciente del usuario
-      const { data: sub, error: subError } = await supabase
+      const { data: sub, error } = await supabase
         .from("subscriptions")
-        .select("plan_id, estado, created_at")
-        .eq("user_id", userId)
+        .select("plan_id, estado")
+        .eq("user_id", session.user.id)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (subError) {
-        console.error("[SuccessClient] Error fetching subscription:", subError);
-        setStatus("error");
+      if (error) throw error;
+
+      if (sub && (sub.estado === "active" || sub.estado === "trialing")) {
+        // ✅ Éxito: mostrar plan y estado
+        const { data: plan } = await supabase
+          .from("subscription_plans")
+          .select("nombre")
+          .eq("id", sub.plan_id)
+          .maybeSingle();
+        setPlanName(plan?.nombre ?? null);
+        setSubscriptionStatus(sub.estado);
+        setStatus("done");
         return;
       }
 
-      if (sub?.plan_id) {
-        const { data: plan } = await supabase
-          .from("subscription_plans")
-          .select("nombre, caracteristicas")
-          .eq("id", sub.plan_id)
-          .maybeSingle();
-
-        setPlanName(plan?.nombre ?? null);
-        setSubscriptionStatus(sub.estado ?? null);
-
-        // Si la suscripción está activa o en trial, consideramos éxito
-        if (sub.estado === "active" || sub.estado === "trialing") {
-          setStatus("done");
-          return;
-        }
-      }
-
-      // Si no hay suscripción activa aún, seguimos en loading para el polling
-      // (a menos que hayamos excedido los intentos máximos)
-      if (attempts >= 12) {
-        // 12 intentos × 2.5s = 30s máximo de espera
+      // Si aún no está activa, reintentar con backoff
+      if (retryCountRef.current < 12) {
+        const delay = Math.min(1000 * Math.pow(1.3, retryCountRef.current), 10000);
+        retryCountRef.current += 1;
+        timeoutRef.current = setTimeout(pollSubscription, delay);
+      } else {
         setStatus("error");
       }
     } catch (err) {
-      console.error("[SuccessClient] Unexpected error:", err);
-      setStatus("error");
+      console.error("[SuccessClient] Poll error:", err);
+      if (retryCountRef.current < 12) {
+        const delay = Math.min(1000 * Math.pow(1.3, retryCountRef.current), 10000);
+        retryCountRef.current += 1;
+        timeoutRef.current = setTimeout(pollSubscription, delay);
+      } else {
+        setStatus("error");
+      }
     }
-  }, [attempts]);
+  }, []);
 
-  // ── Efecto de polling ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (status !== "loading") return;
+    // Iniciar polling al montar el componente
+    pollSubscription();
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [pollSubscription]);
 
-    confirmSession();
-
-    const interval = setInterval(() => {
-      setAttempts((prev) => {
-        if (prev >= 12) {
-          clearInterval(interval);
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, 2500);
-
-    return () => clearInterval(interval);
-  }, [status, confirmSession]);
-
-  // Re-ejecutar confirmSession cuando attempts cambia (durante polling)
-  useEffect(() => {
-    if (status === "loading" && attempts > 0) {
-      confirmSession();
-    }
-  }, [attempts, status, confirmSession]);
-
-  // ── Redirección automática al dashboard tras confirmación ──────────────────
+  // Redirección automática al dashboard tras éxito
   useEffect(() => {
     if (status !== "done") return;
     const timer = setTimeout(() => router.push("/dashboard"), 5000);
@@ -180,8 +154,9 @@ export default function SuccessClient() {
                   <div className="flex flex-col gap-3">
                     <Button
                       onClick={() => {
-                        setAttempts(0);
+                        retryCountRef.current = 0;
                         setStatus("loading");
+                        pollSubscription();
                       }}
                       variant="outline"
                       className="w-full gap-2"
