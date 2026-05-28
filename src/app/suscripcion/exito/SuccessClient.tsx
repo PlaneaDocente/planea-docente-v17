@@ -30,7 +30,7 @@ export default function SuccessClient() {
   const retryCountRef = useRef(0);
   const timeoutRef = useRef<NodeJS.Timeout>();
 
-  // ✅ Polling con backoff exponencial (1s, 1.5s, 2.25s, ... hasta 10s)
+  // ✅ Polling con backoff exponencial
   const pollSubscription = useCallback(async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -49,7 +49,6 @@ export default function SuccessClient() {
       if (error) throw error;
 
       if (sub && (sub.estado === "active" || sub.estado === "trialing")) {
-        // ✅ Éxito: mostrar plan y estado
         const { data: plan } = await supabase
           .from("subscription_plans")
           .select("nombre")
@@ -61,7 +60,6 @@ export default function SuccessClient() {
         return;
       }
 
-      // Si aún no está activa, reintentar con backoff
       if (retryCountRef.current < 12) {
         const delay = Math.min(1000 * Math.pow(1.3, retryCountRef.current), 10000);
         retryCountRef.current += 1;
@@ -82,14 +80,12 @@ export default function SuccessClient() {
   }, []);
 
   useEffect(() => {
-    // Iniciar polling al montar el componente
     pollSubscription();
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, [pollSubscription]);
 
-  // Redirección automática al dashboard tras éxito
   useEffect(() => {
     if (status !== "done") return;
     const timer = setTimeout(() => router.push("/dashboard"), 5000);
@@ -144,12 +140,7 @@ export default function SuccessClient() {
                     </h2>
                     <p className="text-muted-foreground text-sm">
                       No pudimos confirmar tu suscripción automáticamente.
-                      Esto puede deberse a una demora en el procesador de pagos.
                     </p>
-                  </div>
-                  <div className="p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-700 dark:text-amber-300">
-                    💡 Tu pago fue procesado por Stripe. Si en unos minutos no
-                    ves tu plan activo en el dashboard, contacta soporte.
                   </div>
                   <div className="flex flex-col gap-3">
                     <Button
@@ -207,38 +198,9 @@ export default function SuccessClient() {
                         Estado: {subscriptionStatus.replace("_", " ")}
                       </p>
                     )}
-                    {sessionId && (
-                      <p className="text-xs text-muted-foreground font-mono">
-                        Ref: {sessionId.slice(-12)}
-                      </p>
-                    )}
                   </div>
 
-                  <div className="space-y-2">
-                    {[
-                      { icon: GraduationCap, text: "Acceso completo activado" },
-                      { icon: Star, text: "Todas las funciones premium desbloqueadas" },
-                    ].map(({ icon: Icon, text }) => (
-                      <div
-                        key={text}
-                        className="flex items-center justify-center gap-2 p-3 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800"
-                      >
-                        <Icon className="w-5 h-5 text-green-600" />
-                        <p className="text-sm font-medium text-green-700 dark:text-green-300">
-                          {text}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <p className="text-xs text-muted-foreground">
-                    Serás redirigido al dashboard en 5 segundos...
-                  </p>
-
-                  <Button
-                    onClick={() => router.push("/dashboard")}
-                    className="w-full gap-2"
-                  >
+                  <Button onClick={() => router.push("/dashboard")} className="w-full gap-2">
                     Ir al Dashboard
                     <ArrowRight className="w-4 h-4" />
                   </Button>

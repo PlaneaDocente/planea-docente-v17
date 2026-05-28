@@ -177,11 +177,17 @@ export default function SuscripcionSection() {
       setPlans(loadedPlans);
 
       const uid = sessionData.data?.session?.user?.id ?? null;
+      const token = sessionData.data?.session?.access_token ?? null;
       setUserId(uid);
 
-      if (uid) {
+      if (uid && token) {
         try {
-          const subRes = await fetch(`/api/user-subscription?user_id=${uid}`).catch(() => null);
+          // ✅ CORRECCIÓN: Añadir token Bearer al fetch de suscripción
+          const subRes = await fetch(`/api/user-subscription?user_id=${uid}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }).catch(() => null);
           if (subRes && subRes.ok) {
             const subJson = await subRes.json();
             if (subJson.success && subJson.data) {
@@ -208,10 +214,15 @@ export default function SuscripcionSection() {
 
   /* ── Checkout unificado: usa price_id (estándar Stripe) ─────────────── */
   const handleSubscribe = async (plan: DbPlan) => {
-    if (!userId) {
+    // ✅ Obtener sesión y token
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
       toast.error("Debes iniciar sesión para suscribirte.", { duration: 5000 });
       return;
     }
+
+    const token = session.access_token;
+    const userId = session.user.id;
 
     const priceId = billingInterval === "year"
       ? (plan.stripe_price_id_anual || plan.stripe_price_id)
@@ -224,12 +235,15 @@ export default function SuscripcionSection() {
 
     setIsLoading(plan.id);
     try {
+      // ✅ CORRECCIÓN: Añadir token Bearer y quitar user_id del body (lo obtiene del token)
       const res = await fetch("/next_api/stripe/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           price_id: priceId,
-          user_id: userId,
           billing: billingInterval,
           plan_id: plan.id,
         }),
@@ -971,18 +985,30 @@ function PaymentHistoryTable({ userId }: { userId: string | null }) {
 
   useEffect(() => {
     if (!userId) return;
-    setLoading(true);
-    fetch(`/api/payments?user_id=${userId}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.data)) {
+    let mounted = true;
+    const fetchPayments = async () => {
+      setLoading(true);
+      try {
+        // Obtener token de sesión para autenticar la llamada
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        const headers: HeadersInit = {};
+        if (token) headers.Authorization = `Bearer ${token}`;
+        
+        const res = await fetch(`/api/payments?user_id=${userId}`, { headers });
+        const data = await res.json();
+        if (mounted && data.success && Array.isArray(data.data)) {
           setPayments(data.data);
         }
-      })
-      .catch(() => {
-        setPayments([]);
-      })
-      .finally(() => setLoading(false));
+      } catch (err) {
+        console.error("Error fetching payments:", err);
+        if (mounted) setPayments([]);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    fetchPayments();
+    return () => { mounted = false; };
   }, [userId]);
 
   const statusStyles: Record<string, string> = {

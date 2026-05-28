@@ -197,29 +197,43 @@ export async function POST(req: Request) {
         const subscriptionId = subscription.id;
         const status = subscription.status;
         const cancelAtPeriodEnd = subscription.cancel_at_period_end;
+
+        // ✅ Acceso seguro a current_period_end (usando any)
         const currentPeriodEnd = (subscription as any).current_period_end as number;
+
+        // ✅ Obtener el plan_id actual desde el precio de Stripe
+        let newPlanId = null;
+        if (subscription.items.data.length > 0) {
+          const priceId = subscription.items.data[0].price.id;
+          // Buscar el plan en BD que tenga ese stripe_price_id (mensual o anual)
+          const { data: plan } = await supabaseAdmin
+            .from("subscription_plans")
+            .select("id")
+            .or(`stripe_price_id_monthly.eq.${priceId},stripe_price_id_annual.eq.${priceId}`)
+            .maybeSingle();
+          if (plan) newPlanId = plan.id;
+        }
+
+        const updateData: any = {
+          estado: status,
+          cancelar_al_periodo_fin: cancelAtPeriodEnd,
+          fecha_fin: new Date(currentPeriodEnd * 1000).toISOString().split("T")[0],
+        };
+        if (newPlanId) updateData.plan_id = newPlanId;
 
         const { error: updateError } = await supabaseAdmin
           .from("subscriptions")
-          .update({
-            estado: status,
-            cancelar_al_periodo_fin: cancelAtPeriodEnd,
-            fecha_fin: new Date(currentPeriodEnd * 1000).toISOString().split("T")[0],
-          })
+          .update(updateData)
           .eq("stripe_subscription_id", subscriptionId);
 
-        if (updateError) {
-          console.error("❌ Webhook: Error en subscription.updated:", updateError.message);
-        }
+        if (updateError) console.error("❌ Webhook: Error en subscription.updated:", updateError.message);
 
         if (status === "canceled" || status === "unpaid" || status === "incomplete_expired") {
           await supabaseAdmin
             .from("profiles")
             .update({ is_pro: false })
             .eq("stripe_customer_id", subscription.customer as string);
-          console.log(`⚠️ Webhook: Suscripción ${subscriptionId} cancelada`);
         }
-
         break;
       }
 

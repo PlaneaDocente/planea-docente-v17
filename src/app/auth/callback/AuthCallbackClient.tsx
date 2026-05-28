@@ -8,10 +8,6 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
-/**
- * Cliente del callback OAuth. Separado del server page para poder usar
- * useSearchParams dentro de Suspense boundary.
- */
 export default function AuthCallbackClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -23,8 +19,6 @@ export default function AuthCallbackClient() {
 
     const processAuth = async () => {
       try {
-        // 1. Obtener sesión actual (detectSessionInUrl: true en client.ts
-        //    debería haber procesado automáticamente el ?code=)
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
         if (sessionError) {
@@ -37,7 +31,6 @@ export default function AuthCallbackClient() {
           return;
         }
 
-        // 2. Si no hay sesión, intentar exchange manual del code
         if (!session) {
           const code = searchParams?.get("code");
           if (code) {
@@ -60,7 +53,6 @@ export default function AuthCallbackClient() {
           }
         }
 
-        // 3. Re-verificar sesión después del exchange
         const { data: { session: finalSession } } = await supabase.auth.getSession();
         if (!finalSession?.user) {
           if (!mounted) return;
@@ -75,11 +67,15 @@ export default function AuthCallbackClient() {
         setMessage("¡Autenticación exitosa! Redirigiendo...");
         toast.success("¡Bienvenido a PlaneaDocente!");
 
-        // 4. Verificar suscripción y redirigir
+        // ✅ CORRECCIÓN: incluir el token
+        const token = finalSession.access_token;
         try {
-          const res = await fetch(`/api/user-subscription?user_id=${finalSession.user.id}`, {
+          const res = await fetch(`/api/user-subscription`, {
             cache: "no-store",
-            headers: { Accept: "application/json" },
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
           });
 
           if (!res.ok) {
