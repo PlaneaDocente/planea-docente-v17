@@ -18,7 +18,7 @@ type TipoEvaluacion = "rubrica" | "cotejo" | "examen";
 
 interface Evaluacion {
   id: string;
-  user_id: string;
+  maestro_id: string;        // ✅ Cambiado de user_id a maestro_id
   titulo: string;
   materia: string | null;
   tipo: TipoEvaluacion;
@@ -38,7 +38,7 @@ interface AlumnoMini {
 
 interface Calificacion {
   id: string;
-  user_id: string;
+  user_id: string;           // ⚠️ En calificaciones sigue siendo user_id (no cambia)
   evaluacion_id: string;
   alumno_id: string;
   nota: number;
@@ -145,10 +145,11 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
   const cargar = useCallback(async () => {
     if (!grupo || !userId) return;
     setLoading(true);
+    // ✅ CORRECCIÓN: usar maestro_id en lugar de user_id
     const { data, error } = await supabase
       .from("evaluaciones")
       .select("*")
-      .eq("user_id", userId)
+      .eq("maestro_id", userId)      // 🔁 cambiado
       .eq("grupo", grupo)
       .eq("tipo", tipo)
       .order("created_at", { ascending: false });
@@ -161,11 +162,12 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
   const guardar = async () => {
     if (!titulo.trim() || !userId || !grupo) return;
     const criteriosLimpios = criterios.filter(c => c.trim());
+    // ✅ CORRECCIÓN: insertar con maestro_id en lugar de user_id
     const { error } = await supabase.from("evaluaciones").insert({
       titulo: titulo.trim(),
       materia,
       tipo,
-      user_id: userId,
+      maestro_id: userId,    // 🔁 cambiado
       grupo,
       criterios: criteriosLimpios,
       estado: "borrador",
@@ -277,7 +279,7 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
     if (!grupo || !userId) return;
     setLoading(true);
     try {
-      // Alumnos del grupo (usando campo 'grupo' como texto y 'activo' como boolean)
+      // Alumnos del grupo
       const { data: alums } = await supabase
         .from("alumnos")
         .select("id, nombre, apellidos, grupo, activo")
@@ -286,17 +288,17 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
         .eq("activo", true);
       setAlumnos((alums as AlumnoMini[]) || []);
 
-      // Evaluaciones publicadas del grupo
+      // ✅ CORRECCIÓN: evaluaciones publicadas del grupo usando maestro_id
       const { data: evals } = await supabase
         .from("evaluaciones")
         .select("*")
-        .eq("user_id", userId)
+        .eq("maestro_id", userId)      // 🔁 cambiado
         .eq("grupo", grupo)
         .eq("estado", "publicado");
       const evalsData = (evals as Evaluacion[]) || [];
       setEvaluaciones(evalsData);
 
-      // Calificaciones existentes
+      // Calificaciones existentes (la tabla calificaciones usa user_id, no cambia)
       if (evalsData.length > 0) {
         const evalIds = evalsData.map(e => e.id);
         const { data: cals } = await supabase
