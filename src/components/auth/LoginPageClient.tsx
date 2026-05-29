@@ -81,16 +81,32 @@ export default function LoginPageClient() {
 
   /**
    * REDIRECCIÓN POST-LOGIN MEJORADA:
+   * - ✅ CORREGIDO: se añade el token Bearer para evitar 401
    * - Si tiene suscripción activa/trialing → /dashboard
    * - Si NO tiene suscripción → /dashboard con query param para mostrar banner
-   * - NUNCA bloquear al usuario en /suscripcion solo por no tener suscripción
    */
   const handlePostLoginRedirect = useCallback(
     async (userId: string) => {
       try {
+        // ✅ Obtener token de sesión
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+
+        if (!token) {
+          console.warn("[Login] No token available, skipping subscription check");
+          router.push("/dashboard?welcome=back");
+          return;
+        }
+
         const res = await fetch(
           `/api/user-subscription?user_id=${encodeURIComponent(userId)}`,
-          { cache: "no-store", headers: { Accept: "application/json" } }
+          {
+            cache: "no-store",
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          }
         );
 
         if (!res.ok) {
@@ -106,8 +122,7 @@ export default function LoginPageClient() {
         if (hasActivePlan) {
           router.push("/dashboard?welcome=back");
         } else {
-          // ⭐ CAMBIO CRÍTICO: No bloquear en /suscripcion. Ir al dashboard
-          // con un flag que el dashboard puede leer para mostrar banner.
+          // No bloquear en /suscripcion. Ir al dashboard con flag
           toast.info("Bienvenido. Activa un plan para desbloquear todas las funciones.");
           router.push("/dashboard?needs_subscription=true");
         }
