@@ -56,12 +56,25 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
   /**
    * Consulta la suscripción del usuario y notifica al padre con
    * información completa (no solo el User).
+   * ✅ CORREGIDO: se añade el token Bearer
    */
   const checkSubscriptionAndNotify = useCallback(
     async (user: User) => {
       try {
+        // Obtener token de sesión
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) {
+          console.warn("[AuthGate] No token available, cannot fetch subscription");
+          onAuthenticated(user, { hasPlan: false, planName: null });
+          return;
+        }
+
         const res = await fetch(`/api/user-subscription?user_id=${user.id}`, {
           cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         });
         const json = await res.json();
 
@@ -110,9 +123,18 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
 
   /**
    * Crea una suscripción de prueba automáticamente para un usuario recién registrado.
+   * ✅ CORREGIDO: se añade el token Bearer al POST
    */
   const createTrialSubscription = async (userId: string): Promise<boolean> => {
     try {
+      // Obtener token de sesión (después de registro, el usuario aún no está autenticado,
+      // pero para crear la suscripción usamos el service role en el backend, así que
+      // en realidad no necesitamos token aquí si la API está abierta para creación.
+      // Sin embargo, por seguridad, la API debería aceptar crear suscripciones sin token
+      // solo para usuarios recién creados? Mejor obtenemos el token si existe.
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
       const plansRes = await fetch("/api/subscription-plans", { cache: "no-store" });
       const plansJson = await plansRes.json();
 
@@ -132,9 +154,12 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
 
       const refCode = localStorage.getItem("affiliate_ref");
 
+      const headers: HeadersInit = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
       const subRes = await fetch("/api/user-subscription", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           user_id: userId,
           plan_id: trialPlan.id,
