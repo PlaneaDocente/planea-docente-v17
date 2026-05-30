@@ -16,7 +16,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 interface Planeacion {
   id: string;
-  user_id: string;
+  maestro_id: string;        // ✅ Cambiado de user_id a maestro_id
   titulo: string;
   contenido: string;
   materia: string | null;
@@ -111,13 +111,14 @@ function PlaneacionesList({ tipo, userId }: { tipo: string; userId: string | nul
   const cargar = useCallback(async () => {
     if (!userId) { setLoading(false); return; }
     setLoading(true);
+    // ✅ CORREGIDO: usar maestro_id y el tipo correcto
     const { data, error } = await supabase
-      .from("planeaciones")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("tipo_planeacion", tipo)
-      .eq("generada_por_ia", false)
-      .order("created_at", { ascending: false });
+      .from('planeaciones')
+      .select('*')
+      .eq('maestro_id', userId)
+      .eq('tipo_planeacion', tipo)
+      .eq('generada_por_ia', false)
+      .order('created_at', { ascending: false });
     if (!error && data) setPlaneaciones(data as Planeacion[]);
     setLoading(false);
   }, [userId, tipo]);
@@ -126,8 +127,9 @@ function PlaneacionesList({ tipo, userId }: { tipo: string; userId: string | nul
 
   const guardar = async () => {
     if (!titulo.trim() || !userId) return;
+    // ✅ CORREGIDO: usar maestro_id en lugar de user_id
     const { error } = await supabase.from("planeaciones").insert({
-      user_id: userId,
+      maestro_id: userId,
       titulo: titulo.trim(),
       materia,
       grado,
@@ -238,10 +240,11 @@ function PlaneacionesGuardadasView({ userId }: { userId: string | null }) {
     if (!userId) { toast.error("Debes iniciar sesión"); return; }
     setLoading(true);
     try {
+      // ✅ CORREGIDO: usar maestro_id en lugar de user_id
       const { data, error } = await supabase
         .from("planeaciones")
         .select("*")
-        .eq("user_id", userId)
+        .eq("maestro_id", userId)
         .order("created_at", { ascending: false });
       if (error) throw error;
       setPlaneaciones((data as Planeacion[]) || []);
@@ -331,11 +334,22 @@ function BibliotecaActividades() {
   useEffect(() => {
     const cargar = async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("biblioteca_actividades")
-        .select("*")
-        .order("usos", { ascending: false });
-      if (!error && data) setActividades(data as ActividadBiblioteca[]);
+      try {
+        const { data, error } = await supabase
+          .from("biblioteca_actividades")
+          .select("*")
+          .order("usos", { ascending: false });
+        if (!error && data) {
+          setActividades(data as ActividadBiblioteca[]);
+        } else if (error?.code === "42P01") {
+          // ✅ Tabla no existe, mostrar mensaje amigable
+          console.warn("Tabla biblioteca_actividades no existe aún");
+          setActividades([]);
+        }
+      } catch (err) {
+        console.error("Error cargando biblioteca:", err);
+        setActividades([]);
+      }
       setLoading(false);
     };
     cargar();
@@ -348,6 +362,16 @@ function BibliotecaActividades() {
 
   if (loading) {
     return <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  }
+
+  if (actividades.length === 0) {
+    return (
+      <div className="bg-card rounded-2xl p-10 border border-border text-center">
+        <BookOpen className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+        <p className="font-medium text-foreground mb-1">Biblioteca de actividades</p>
+        <p className="text-sm text-muted-foreground">Próximamente encontrarás actividades didácticas precargadas.</p>
+      </div>
+    );
   }
 
   return (
@@ -452,8 +476,9 @@ function AIGeneratorModal({ onClose, userId }: { onClose: () => void; userId: st
 
   const handleGuardar = async () => {
     if (!planeacionGenerada || !userId) { toast.error("No hay planeación para guardar"); return; }
+    // ✅ CORREGIDO: usar maestro_id en lugar de user_id
     const { error } = await supabase.from("planeaciones").insert({
-      user_id: userId,
+      maestro_id: userId,
       titulo: `Planeación IA: ${tema}`,
       contenido: planeacionGenerada,
       materia,
