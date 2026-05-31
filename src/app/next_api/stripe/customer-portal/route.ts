@@ -6,7 +6,6 @@ export const dynamic = 'force-dynamic';
 function getStripe(): Stripe | null {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) return null;
-  // ✅ Usar la misma versión que en checkout y webhook
   return new Stripe(key, { apiVersion: "2026-04-22.dahlia" });
 }
 
