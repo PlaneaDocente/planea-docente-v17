@@ -243,7 +243,8 @@ function FotosView({ grupo, userId }: { grupo: string; userId: string | null }) 
       if (!file.type.startsWith("image/")) continue;
 
       try {
-        const path = `${userId}/${grupo}/fotos/${Date.now()}-${file.name}`;
+        const safeGrupo = grupo.replace(/[^a-zA-Z0-9_\-]/g, "_");
+        const path = `${userId}/${safeGrupo}/fotos/${Date.now()}-${file.name}`;
 
         // Subir a Storage
         const { error: upError } = await supabase.storage
@@ -634,7 +635,8 @@ function DocumentosView({ grupo, userId }: { grupo: string; userId: string | nul
     let subidas = 0;
     for (const file of files) {
       try {
-        const path = `${userId}/${grupo}/documentos/${Date.now()}-${file.name}`;
+        const safeGrupo = grupo.replace(/[^a-zA-Z0-9_\-]/g, "_");
+        const path = `${userId}/${safeGrupo}/documentos/${Date.now()}-${file.name}`;
         const { error: upError } = await supabase.storage.from("evidencias").upload(path, file, { cacheControl: "3600", upsert: false });
         if (upError) throw upError;
         const { data: urlData } = supabase.storage.from("evidencias").getPublicUrl(path);
@@ -803,7 +805,8 @@ function VideosView({ grupo, userId }: { grupo: string; userId: string | null })
     let subidas = 0;
     for (const file of files) {
       try {
-        const path = `${userId}/${grupo}/videos/${Date.now()}-${file.name}`;
+        const safeGrupo = grupo.replace(/[^a-zA-Z0-9_\-]/g, "_");
+        const path = `${userId}/${safeGrupo}/videos/${Date.now()}-${file.name}`;
         const { error: upError } = await supabase.storage.from("evidencias").upload(path, file, { cacheControl: "3600", upsert: false });
         if (upError) throw upError;
         const { data: urlData } = supabase.storage.from("evidencias").getPublicUrl(path);
