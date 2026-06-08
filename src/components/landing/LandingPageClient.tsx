@@ -25,7 +25,7 @@ export default function LandingPageClient() {
     });
   }, []);
 
-  const goToDashboard = () => router.push("/");
+  const goToDashboard = () => router.push("/dashboard");
   const goToLogin = () => router.push("/login");
   const goToRegister = () => router.push("/registro");
 

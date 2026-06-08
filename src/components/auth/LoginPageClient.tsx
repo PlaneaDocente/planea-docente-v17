@@ -11,54 +11,47 @@ import { Input }    from "@/components/ui/input";
 import { Label }    from "@/components/ui/label";
 import { toast }    from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 export default function LoginPageClient() {
-  const router       = useRouter();
-  const searchParams = useSearchParams();
+  const router = useRouter();
 
-  // Destino final tras el login. Si viene redirect=/dashboard usamos "/"
-  // porque el dashboard vive en la raíz (MainLayout).
-  const rawRedirect  = searchParams?.get("redirect") ?? "/";
-  const redirectTo   = rawRedirect === "/dashboard" ? "/" : rawRedirect;
-
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);   // arranca verificando
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [email,          setEmail]          = useState("");
   const [password,       setPassword]       = useState("");
   const [showPassword,   setShowPassword]   = useState(false);
   const [isLoading,      setIsLoading]      = useState(false);
   const [isGoogleLoading,setIsGoogleLoading]= useState(false);
 
-  // ── FIX 1: Detectar sesión existente y escuchar cambios de auth ──────────
+  // ── Detectar sesión existente — redirige a /dashboard directamente ──────
   useEffect(() => {
     let redirected = false;
 
-    // Verificar si el usuario YA tiene sesión activa al cargar esta página
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user && !redirected) {
         redirected = true;
-        // Ya está autenticado → saltar el login y ir al destino
-        router.replace(redirectTo);
+        router.replace("/dashboard");
         return;
       }
       setIsCheckingAuth(false);
     });
 
-    // Escuchar OAuth callback (Google redirige aquí con la sesión activa)
+    // Capturar callback de Google OAuth
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (event === "SIGNED_IN" && session?.user && !redirected) {
           redirected = true;
-          router.replace(redirectTo);
+          // Ir al callback para validar suscripción y redirigir correctamente
+          router.replace("/dashboard");
         }
       }
     );
 
     return () => subscription.unsubscribe();
-  }, [router, redirectTo]);
+  }, [router]);
 
-  // ── Pantalla de carga mientras se verifica la sesión ─────────────────────
+  // ── Spinner mientras verifica sesión ────────────────────────────────────
   if (isCheckingAuth) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-violet-50 to-indigo-100 dark:from-violet-950 dark:to-indigo-900 flex items-center justify-center p-4">
@@ -73,7 +66,7 @@ export default function LoginPageClient() {
     );
   }
 
-  // ── Login con email ───────────────────────────────────────────────────────
+  // ── Login con email ─────────────────────────────────────────────────────
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
@@ -92,7 +85,7 @@ export default function LoginPageClient() {
         return;
       }
       toast.success("¡Bienvenido de vuelta!");
-      router.replace(redirectTo);
+      router.push("/dashboard");  // ← DIRECTO al dashboard, nunca a /
     } catch {
       toast.error("Error al iniciar sesión. Intenta de nuevo.");
     } finally {
@@ -100,22 +93,22 @@ export default function LoginPageClient() {
     }
   };
 
-  // ── Login con Google ──────────────────────────────────────────────────────
+  // ── Login con Google ────────────────────────────────────────────────────
   const handleGoogleLogin = async () => {
     setIsGoogleLoading(true);
     try {
-      // redirectTo apunta a "/" para que MainLayout detecte la sesión y entre al dashboard
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/`,
+          // ← /auth/callback procesa el código y redirige a /dashboard
+          redirectTo: `${window.location.origin}/auth/callback`,
         },
       });
       if (error) {
         toast.error("Error al conectar con Google: " + error.message);
         setIsGoogleLoading(false);
       }
-      // Si no hay error, Supabase redirige automáticamente. No hacemos nada más.
+      // Supabase redirige automáticamente — no hacer nada más
     } catch (err) {
       console.error("Error en flujo Google:", err);
       toast.error("Error inesperado al conectar con Google.");
@@ -123,7 +116,7 @@ export default function LoginPageClient() {
     }
   };
 
-  // ── Render del formulario ─────────────────────────────────────────────────
+  // ── Formulario ──────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 to-indigo-100 dark:from-violet-950 dark:to-indigo-900 flex items-center justify-center p-4">
       <motion.div
@@ -132,7 +125,6 @@ export default function LoginPageClient() {
         className="w-full max-w-md"
       >
         <div className="bg-card rounded-3xl shadow-2xl border border-border p-8">
-
           <div className="text-center mb-8">
             <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4 shadow-lg">
               <GraduationCap className="w-7 h-7 text-white" />
@@ -143,7 +135,7 @@ export default function LoginPageClient() {
             </p>
           </div>
 
-          {/* Botón Google */}
+          {/* Google */}
           <Button
             variant="outline"
             className="w-full gap-3 mb-6 h-11"
@@ -166,7 +158,7 @@ export default function LoginPageClient() {
             </div>
           </div>
 
-          {/* Formulario email */}
+          {/* Email + Password */}
           <form onSubmit={handleEmailLogin} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Correo electrónico</Label>
@@ -219,7 +211,7 @@ export default function LoginPageClient() {
             </Button>
           </form>
 
-          {/* Footer links */}
+          {/* Links */}
           <div className="mt-6 text-center space-y-3">
             <p className="text-sm text-muted-foreground">
               ¿No tienes cuenta?{" "}
@@ -234,7 +226,6 @@ export default function LoginPageClient() {
               <ArrowLeft className="w-3 h-3" /> Volver al inicio
             </Link>
           </div>
-
         </div>
       </motion.div>
     </div>

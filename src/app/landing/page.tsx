@@ -1,12 +1,7 @@
-// ================================================================
-// page.tsx — RUTA: src/app/landing/page.tsx
-//
-// CAMBIO: Agrega LandingAuthGuard para redirigir usuarios
-// autenticados directamente al dashboard sin mostrarse la landing.
-// ================================================================
+// RUTA: src/app/landing/page.tsx
+// Sin LandingAuthGuard — causaba bucle porque / siempre redirige a /landing
 
 import LandingPageClient from "@/components/landing/LandingPageClient";
-import LandingAuthGuard  from "@/components/landing/LandingAuthGuard";
 
 export const metadata = {
   title: "PlaneaDocente – La plataforma educativa #1 para maestros mexicanos",
@@ -15,13 +10,5 @@ export const metadata = {
 };
 
 export default function LandingPage() {
-  return (
-    <>
-      {/* Guard invisible: redirige a / si el usuario ya tiene sesión */}
-      <LandingAuthGuard />
-
-      {/* Página normal de landing para usuarios no autenticados */}
-      <LandingPageClient />
-    </>
-  );
+  return <LandingPageClient />;
 }
