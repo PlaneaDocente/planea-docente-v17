@@ -18,6 +18,7 @@ export default function LoginPageClient() {
   const router = useRouter();
 
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [authTimeout,    setAuthTimeout]    = useState(false); // fallback si redirect falla
   const [email,          setEmail]          = useState("");
   const [password,       setPassword]       = useState("");
   const [showPassword,   setShowPassword]   = useState(false);
@@ -28,27 +29,43 @@ export default function LoginPageClient() {
   useEffect(() => {
     let redirected = false;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user && !redirected) {
-        redirected = true;
-        router.replace("/dashboard");
-        return;
-      }
+    // Si el redirect demora más de 4s, mostrar botón manual
+    const fallbackTimer = setTimeout(() => {
+      setAuthTimeout(true);
       setIsCheckingAuth(false);
+    }, 4000);
+
+    const doRedirect = () => {
+      if (!redirected) {
+        redirected = true;
+        clearTimeout(fallbackTimer);
+        router.replace("/dashboard");
+      }
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        doRedirect();
+      } else {
+        // No hay sesión: mostrar formulario de login
+        clearTimeout(fallbackTimer);
+        setIsCheckingAuth(false);
+      }
     });
 
     // Capturar callback de Google OAuth
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        if (event === "SIGNED_IN" && session?.user && !redirected) {
-          redirected = true;
-          // Ir al callback para validar suscripción y redirigir correctamente
-          router.replace("/dashboard");
+        if (event === "SIGNED_IN" && session?.user) {
+          doRedirect();
         }
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(fallbackTimer);
+      subscription.unsubscribe();
+    };
   }, [router]);
 
   // ── Spinner mientras verifica sesión ────────────────────────────────────
@@ -59,8 +76,19 @@ export default function LoginPageClient() {
           <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center shadow-lg">
             <GraduationCap className="w-7 h-7 text-white" />
           </div>
-          <Loader2 className="w-7 h-7 animate-spin text-primary" />
-          <p className="text-sm text-muted-foreground">Verificando sesión...</p>
+          {authTimeout ? (
+            <>
+              <p className="text-sm text-muted-foreground">Sesión detectada</p>
+              <Button className="w-full" onClick={() => router.replace("/dashboard")}>
+                Ir al Dashboard →
+              </Button>
+            </>
+          ) : (
+            <>
+              <Loader2 className="w-7 h-7 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Verificando sesión...</p>
+            </>
+          )}
         </div>
       </div>
     );

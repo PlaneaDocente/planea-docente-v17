@@ -52,19 +52,56 @@ export default function DashboardPage() {
   // 1. Obtener sesión y token
   useEffect(() => {
     let mounted = true;
-    const loadSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!mounted) return;
-      if (!session?.user) {
-        router.push("/login?redirect=/dashboard");
-        return;
-      }
+    let redirectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applySession = (session: any) => {
+      if (!mounted || !session?.user) return false;
       setUser(session.user);
       setSessionToken(session.access_token);
       setLoading(false);
+      return true;
     };
+
+    const loadSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
+
+      if (session?.user) {
+        applySession(session);
+        return;
+      }
+
+      // getSession() devolvió null — puede ser un token refresh en curso.
+      // Esperar hasta 3 segundos a que onAuthStateChange confirme la sesión.
+      redirectTimer = setTimeout(() => {
+        if (mounted) {
+          router.push("/login?redirect=/dashboard");
+        }
+      }, 3000);
+    };
+
+    // Fallback: capturar sesión si llega por refresh de token
+    const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!mounted) return;
+        if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session?.user) {
+          if (applySession(session) && redirectTimer) {
+            clearTimeout(redirectTimer); // ya tenemos sesión, cancelar redirect a login
+            redirectTimer = null;
+          }
+        }
+        if (event === "SIGNED_OUT") {
+          router.push("/login?redirect=/dashboard");
+        }
+      }
+    );
+
     loadSession();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+      if (redirectTimer) clearTimeout(redirectTimer);
+      authSub.unsubscribe();
+    };
   }, [router]);
 
   // 2. Cargar suscripción con token
