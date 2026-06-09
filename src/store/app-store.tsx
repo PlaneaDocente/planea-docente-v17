@@ -282,7 +282,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       console.log("[AppStore] Auth event:", event);
-      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+      if (event === "SIGNED_IN") {
         useAppStore.setState({
           session, user: session?.user ?? null,
           currentUser: session?.user ?? null, isAuthenticated: !!session,
@@ -308,7 +308,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       lastUserRef.current = userId;
       refreshSubscription();
     }
-  }, [user?.id, session?.access_token, refreshSubscription]);
+  }, [user?.id, refreshSubscription]);
 
   return <>{children}</>;
 }
