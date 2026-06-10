@@ -108,6 +108,7 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://accounts.google.com https://apis.google.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: https: blob:",
+      "media-src 'self' blob: https://*.supabase.co",
       "font-src 'self' https://fonts.gstatic.com",
       "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://accounts.google.com https://api.groq.com https://api-inference.huggingface.co",
       "frame-src https://js.stripe.com https://hooks.stripe.com https://accounts.google.com https://docs.google.com",
