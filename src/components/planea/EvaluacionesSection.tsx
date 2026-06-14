@@ -302,7 +302,7 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
       if (evalsData.length > 0) {
         const evalIds = evalsData.map(e => e.id);
         const { data: cals } = await supabase
-          .from("calificaciones")
+          .from("calificaciones_nem")
           .select("*")
           .eq("user_id", userId)
           .in("evaluacion_id", evalIds);
@@ -326,7 +326,7 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
     const num = parseFloat(nota);
     if (isNaN(num) || num < 0 || num > 10) return;
     if (!userId) return;
-    const { error } = await supabase.from("calificaciones").upsert({
+    const { error } = await supabase.from("calificaciones_nem").upsert({
       user_id: userId,
       evaluacion_id: evalId,
       alumno_id: alumnoId,

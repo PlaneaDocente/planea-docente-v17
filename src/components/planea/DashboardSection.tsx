@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Users, CalendarCheck, BookOpen, Target, BarChart3,
@@ -9,38 +10,87 @@ import {
 import { Button } from "@/components/ui/button";
 import StatCard from "./StatCard";
 import MiniCalendar from "./MiniCalendar";
-import { mockStats, mockCalendario, mockAsistencia, mockPlaneaciones } from "@/data/mock-data";
 import { useAppStore } from "@/store/app-store";
+import { supabase } from "@/integrations/supabase/client";
+import { mockCalendario } from "@/data/mock-data";
 
-const stats = [
-  { title: "Alumnos Registrados", value: mockStats.alumnosRegistrados, subtitle: "Grupo 3°A", icon: Users, color: "text-blue-600", bgColor: "bg-blue-100 dark:bg-blue-950", trend: "+2 este mes" },
-  { title: "Asistencia Hoy", value: mockStats.asistenciaHoy, subtitle: `${mockStats.alumnosRegistrados - mockStats.asistenciaHoy} ausentes`, icon: CalendarCheck, color: "text-emerald-600", bgColor: "bg-emerald-100 dark:bg-emerald-950", trend: "93.7%" },
-  { title: "Planeaciones Pendientes", value: mockStats.planeacionesPendientes, subtitle: "Por completar", icon: BookOpen, color: "text-amber-600", bgColor: "bg-amber-100 dark:bg-amber-950" },
-  { title: "Actividades Activas", value: mockStats.actividadesPendientes, subtitle: "Esta semana", icon: Target, color: "text-purple-600", bgColor: "bg-purple-100 dark:bg-purple-950" },
-  { title: "Evaluaciones", value: mockStats.evaluacionesEstemes, subtitle: "Este mes", icon: BarChart3, color: "text-rose-600", bgColor: "bg-rose-100 dark:bg-rose-950" },
-  { title: "Mensajes Nuevos", value: mockStats.mensajesNuevos, subtitle: "De padres", icon: MessageSquare, color: "text-cyan-600", bgColor: "bg-cyan-100 dark:bg-cyan-950" },
-];
+interface DashStats {
+  alumnos: number;
+  asistenciaHoy: number;
+  planeacionesPendientes: number;
+  actividadesActivas: number;
+  evaluacionesMes: number;
+  mensajesNuevos: number;
+}
 
-// 🔧 CORRECCIÓN: Adaptar mockCalendario al formato que MiniCalendar espera: { day: number, title: string }
+// Adaptamos mockCalendario para MiniCalendar
 const calendarEvents = mockCalendario.map((event: any) => ({
   day: new Date(event.fecha).getDate(),
   title: event.titulo,
 }));
 
 export default function DashboardSection() {
-  const { setActiveSection } = useAppStore();
-  // 🔧 Agregado: leer plan desde AppStore para mostrar en banner
-  const { getPlanDisplayName, isPro, isTrial } = useAppStore();
+  const { setActiveSection, getPlanDisplayName, isPro, isTrial } = useAppStore();
   const planName = getPlanDisplayName();
   const pro = isPro();
   const trial = isTrial();
+
+  const [stats, setStats] = useState<DashStats>({
+    alumnos: 0, asistenciaHoy: 0, planeacionesPendientes: 0,
+    actividadesActivas: 0, evaluacionesMes: 0, mensajesNuevos: 0,
+  });
+
+  useEffect(() => {
+    const cargar = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const uid = user.id;
+      const hoy = new Date().toISOString().split("T")[0];
+      const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0];
+
+      const [
+        { count: alumnos },
+        { count: asistenciaHoy },
+        { count: planeaciones },
+        { count: actividades },
+        { count: evaluaciones },
+        { count: mensajes },
+      ] = await Promise.all([
+        supabase.from("alumnos").select("*", { count: "exact", head: true }).eq("user_id", uid).eq("activo", true),
+        supabase.from("asistencia").select("*", { count: "exact", head: true }).eq("user_id", uid).eq("fecha", hoy),
+        supabase.from("planeaciones").select("*", { count: "exact", head: true }).eq("maestro_id", uid).eq("estado", "borrador"),
+        supabase.from("actividades").select("*", { count: "exact", head: true }).eq("user_id", uid).eq("estado", "activo"),
+        supabase.from("evaluaciones").select("*", { count: "exact", head: true }).eq("maestro_id", uid).gte("created_at", inicioMes),
+        supabase.from("mensajes").select("*", { count: "exact", head: true }).eq("user_id", uid).eq("leido", false),
+      ]);
+
+      setStats({
+        alumnos: alumnos || 0,
+        asistenciaHoy: asistenciaHoy || 0,
+        planeacionesPendientes: planeaciones || 0,
+        actividadesActivas: actividades || 0,
+        evaluacionesMes: evaluaciones || 0,
+        mensajesNuevos: mensajes || 0,
+      });
+    };
+    cargar();
+  }, []);
+
+  const statCards = [
+    { title: "Alumnos Registrados",      value: stats.alumnos,               subtitle: "Alumnos activos",      icon: Users,         color: "text-blue-600",    bgColor: "bg-blue-100 dark:bg-blue-950" },
+    { title: "Asistencia Hoy",            value: stats.asistenciaHoy,          subtitle: "Registros de hoy",     icon: CalendarCheck, color: "text-emerald-600", bgColor: "bg-emerald-100 dark:bg-emerald-950" },
+    { title: "Planeaciones Pendientes",   value: stats.planeacionesPendientes, subtitle: "Por completar",        icon: BookOpen,      color: "text-amber-600",   bgColor: "bg-amber-100 dark:bg-amber-950" },
+    { title: "Actividades Activas",       value: stats.actividadesActivas,     subtitle: "Esta semana",          icon: Target,        color: "text-purple-600",  bgColor: "bg-purple-100 dark:bg-purple-950" },
+    { title: "Evaluaciones",              value: stats.evaluacionesMes,        subtitle: "Este mes",             icon: BarChart3,     color: "text-rose-600",    bgColor: "bg-rose-100 dark:bg-rose-950" },
+    { title: "Mensajes sin leer",         value: stats.mensajesNuevos,         subtitle: "De padres",            icon: MessageSquare, color: "text-cyan-600",    bgColor: "bg-cyan-100 dark:bg-cyan-950" },
+  ];
 
   return (
     <div className="space-y-6">
       <WelcomeBanner planName={planName} isPro={pro} isTrial={trial} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-        {stats.map((s, i) => (
+        {statCards.map((s, i) => (
           <StatCard key={s.title} {...s} index={i} />
         ))}
       </div>
