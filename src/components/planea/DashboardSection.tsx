@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
@@ -122,7 +122,7 @@ export default function DashboardSection() {
   );
 }
 
-/* â”€â”€â”€ WelcomeBanner â€” ahora recibe stats reales como props â”€â”€â”€ */
+/* ─── WelcomeBanner — ahora recibe stats reales como props ─── */
 function WelcomeBanner({
   planName,
   isPro,
@@ -138,7 +138,7 @@ function WelcomeBanner({
 }) {
   const hour = new Date().getHours();
   const greeting =
-    hour < 12 ? "Buenos dÃ­as" : hour < 18 ? "Buenas tardes" : "Buenas noches";
+    hour < 12 ? "Buenos días" : hour < 18 ? "Buenas tardes" : "Buenas noches";
 
   return (
     <motion.div
@@ -148,11 +148,11 @@ function WelcomeBanner({
     >
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold mb-1">{greeting}, Maestra Ana ðŸ‘‹</h2>
+          <h2 className="text-xl font-bold mb-1">{greeting}, Maestra Ana 👋</h2>
           <p className="text-white/80 text-sm">
             {isPro
               ? `${planName}${isTrial ? " (Trial)" : ""}. Tienes ${pendientes} planeaciones pendientes y ${mensajes} mensajes nuevos.`
-              : "EstÃ¡s en el plan gratuito. Actualiza para desbloquear todas las herramientas."}
+              : "Estás en el plan gratuito. Actualiza para desbloquear todas las herramientas."}
           </p>
         </div>
         <div className="hidden md:flex items-center gap-2 bg-white/20 rounded-xl px-4 py-2">
@@ -164,11 +164,11 @@ function WelcomeBanner({
   );
 }
 
-/* â”€â”€â”€ QuickActions â”€â”€â”€ */
+/* ─── QuickActions ─── */
 function QuickActions({ setActiveSection }: { setActiveSection: (s: any) => void }) {
   const actions = [
     { label: "Tomar Asistencia", icon: CalendarCheck, color: "bg-emerald-500 hover:bg-emerald-600", section: "asistencia" },
-    { label: "Crear PlaneaciÃ³n", icon: BookOpen,      color: "bg-blue-500 hover:bg-blue-600",       section: "planeacion" },
+    { label: "Crear Planeación", icon: BookOpen,      color: "bg-blue-500 hover:bg-blue-600",       section: "planeacion" },
     { label: "Nueva Actividad",  icon: Target,        color: "bg-purple-500 hover:bg-purple-600",   section: "actividades" },
     { label: "Subir Evidencia",  icon: Camera,        color: "bg-rose-500 hover:bg-rose-600",       section: "evidencias" },
     { label: "Generar Reporte",  icon: BarChart3,     color: "bg-amber-500 hover:bg-amber-600",     section: "reportes" },
@@ -178,7 +178,7 @@ function QuickActions({ setActiveSection }: { setActiveSection: (s: any) => void
   return (
     <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
       <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-        <Zap className="w-4 h-4 text-amber-500" /> Acciones RÃ¡pidas
+        <Zap className="w-4 h-4 text-amber-500" /> Acciones Rápidas
       </h3>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {actions.map((a) => {
@@ -201,14 +201,14 @@ function QuickActions({ setActiveSection }: { setActiveSection: (s: any) => void
   );
 }
 
-/* â”€â”€â”€ RecentActivity â”€â”€â”€ */
+/* ─── RecentActivity ─── */
 function RecentActivity() {
   const items = [
     { icon: CheckCircle2, color: "text-emerald-500", text: "Asistencia registrada - 30/32 presentes",  time: "Hace 2h" },
-    { icon: BookOpen,     color: "text-blue-500",    text: "PlaneaciÃ³n semanal creada - MatemÃ¡ticas",  time: "Ayer" },
+    { icon: BookOpen,     color: "text-blue-500",    text: "Planeación semanal creada - Matemáticas",  time: "Ayer" },
     { icon: Target,       color: "text-purple-500",  text: "Tarea asignada - Fracciones",              time: "Ayer" },
-    { icon: MessageSquare,color: "text-cyan-500",    text: "Mensaje enviado a padres de familia",      time: "Hace 2 dÃ­as" },
-    { icon: Camera,       color: "text-rose-500",    text: "3 evidencias subidas al portafolio",       time: "Hace 3 dÃ­as" },
+    { icon: MessageSquare,color: "text-cyan-500",    text: "Mensaje enviado a padres de familia",      time: "Hace 2 días" },
+    { icon: Camera,       color: "text-rose-500",    text: "3 evidencias subidas al portafolio",       time: "Hace 3 días" },
   ];
 
   return (
@@ -238,7 +238,7 @@ function RecentActivity() {
   );
 }
 
-/* â”€â”€â”€ AIFeaturesBanner â”€â”€â”€ */
+/* ─── AIFeaturesBanner ─── */
 function AIFeaturesBanner() {
   const { setActiveSection } = useAppStore();
   return (
@@ -252,7 +252,7 @@ function AIFeaturesBanner() {
         <h3 className="font-bold text-sm">IA Educativa</h3>
       </div>
       <p className="text-xs text-white/80 mb-4">
-        Genera planeaciones, rÃºbricas y exÃ¡menes automÃ¡ticamente con inteligencia artificial.
+        Genera planeaciones, rúbricas y exámenes automáticamente con inteligencia artificial.
       </p>
       <Button
         size="sm"
@@ -264,4 +264,3 @@ function AIFeaturesBanner() {
     </motion.div>
   );
 }
-
