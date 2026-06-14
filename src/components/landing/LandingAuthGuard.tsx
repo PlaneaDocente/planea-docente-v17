@@ -4,9 +4,9 @@
 // LandingAuthGuard.tsx
 // RUTA: src/components/landing/LandingAuthGuard.tsx
 //
-// Propósito: Si el usuario ya tiene sesión activa y llega a /landing,
-// lo redirige automáticamente a / (donde MainLayout muestra el dashboard).
-// No renderiza nada visible — solo maneja la redirección.
+// Si el usuario ya tiene sesión activa y llega a /landing,
+// lo redirige automáticamente a /dashboard (no a / que siempre
+// redirige de vuelta a /landing causando un bucle infinito).
 // ================================================================
 
 import { useEffect } from "react";
@@ -19,28 +19,27 @@ export default function LandingAuthGuard() {
   useEffect(() => {
     let redirected = false;
 
+    const doRedirect = () => {
+      if (!redirected) {
+        redirected = true;
+        router.replace("/dashboard"); // ✅ CORREGIDO: era "/" → causaba bucle
+      }
+    };
+
     // Verificar sesión existente al cargar /landing
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user && !redirected) {
-        redirected = true;
-        // Usuario autenticado → ir al dashboard (MainLayout en /)
-        router.replace("/");
-      }
+      if (session?.user) doRedirect();
     });
 
-    // Escuchar si Google OAuth completa mientras está en /landing
+    // Capturar si Google OAuth completa mientras está en /landing
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        if (event === "SIGNED_IN" && session?.user && !redirected) {
-          redirected = true;
-          router.replace("/");
-        }
+        if (event === "SIGNED_IN" && session?.user) doRedirect();
       }
     );
 
     return () => subscription.unsubscribe();
   }, [router]);
 
-  // No renderiza nada — solo lógica de redirección
   return null;
 }

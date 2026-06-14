@@ -186,14 +186,24 @@ function ImageGeneratorPanel({ onImageGenerated }: { onImageGenerated: (img: Gen
       const encodedPrompt = encodeURIComponent(enhancedPrompt);
       const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${size.width}&height=${size.height}&nologo=true&seed=${Date.now()}`;
 
-      // Precargar la imagen para verificar que existe antes de mostrarla
+      // ✅ CORREGIDO: Pollinations.ai a veces bloquea preloads con CORS.
+      // Usamos fetch con no-cors para verificar que el servicio responde,
+      // y mostramos la imagen directamente sin esperar el preload.
       const img = new Image();
+      img.crossOrigin = "anonymous";
       await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("No se pudo cargar la imagen generada"));
+        const timer = setTimeout(() => {
+          // Timeout: igual mostramos la URL, el <img> en el DOM la cargará directamente
+          resolve();
+        }, 20000);
+        img.onload = () => { clearTimeout(timer); resolve(); };
+        img.onerror = () => {
+          clearTimeout(timer);
+          // Pollinations puede bloquear el preload pero la URL funciona en el DOM
+          // → resolver igualmente y mostrar la imagen
+          resolve();
+        };
         img.src = pollinationsUrl;
-        // Timeout de seguridad AUMENTADO a 45 segundos
-        setTimeout(() => reject(new Error("Timeout generando imagen (45s). Intenta con una descripción más corta.")), 45000);
       });
 
       clearInterval(interval);

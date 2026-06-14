@@ -5,9 +5,11 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: 'https', hostname: 'images.unsplash.com' },
       { protocol: 'https', hostname: '*.supabase.co' },
+      { protocol: 'https', hostname: 'image.pollinations.ai' },
     ],
     unoptimized: true,
   },
+  // ✅ Redirigir de la URL de Vercel al dominio principal
   async redirects() {
     return [
       {
@@ -23,31 +25,8 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  // ✅ Headers CSP para permitir WebSocket y APIs externas
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.stripe.com https://*.supabase.co",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: https://*.supabase.co https://images.unsplash.com",
-              "font-src 'self' data:",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://accounts.google.com https://api.groq.com https://api-inference.huggingface.co",
-              "frame-src https://*.stripe.com https://accounts.google.com",
-              "object-src 'none'",
-              "base-uri 'self'",
-              "form-action 'self'",
-            ].join('; '),
-          },
-        ],
-      },
-    ];
-  },
+  // ✅ CSP eliminada de aquí — se maneja exclusivamente en src/middleware.ts
+  // Tener CSP en ambos lugares causaba conflictos y headers duplicados
 };
 
 export default nextConfig;
