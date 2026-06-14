@@ -279,17 +279,30 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   }, [initSession]);
 
   // Escuchar cambios de auth
+  // ✅ FIX: Usar ref para evitar que SIGNED_IN dispare refreshSubscription múltiples veces.
+  // Supabase JS v2 emite SIGNED_IN en cada token refresh automático.
+  // Con el ref, solo procesamos el primer SIGNED_IN por session de usuario.
+  const signedInUserRef = useRef<string | null>(null);
+
   useEffect(() => {
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       console.log("[AppStore] Auth event:", event);
-      if (event === "SIGNED_IN") {
+
+      if (event === "SIGNED_IN" && session?.user) {
+        // Solo actualizar estado — siempre
         useAppStore.setState({
-          session, user: session?.user ?? null,
-          currentUser: session?.user ?? null, isAuthenticated: !!session,
+          session, user: session.user,
+          currentUser: session.user, isAuthenticated: true,
         });
-        setTimeout(() => refreshSubscription(), 500);
+        // Solo llamar refreshSubscription si es un NUEVO usuario (no token refresh)
+        if (signedInUserRef.current !== session.user.id) {
+          signedInUserRef.current = session.user.id;
+          setTimeout(() => refreshSubscription(), 500);
+        }
       }
+
       if (event === "SIGNED_OUT") {
+        signedInUserRef.current = null;
         useAppStore.setState({
           user: null, session: null, currentUser: null,
           isAuthenticated: false, currentPlan: "gratuito", subscription: null,
