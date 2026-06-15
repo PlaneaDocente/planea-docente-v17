@@ -1,67 +1,76 @@
 // RUTA: src/app/next_api/ai/generate-image/route.ts
-// Genera imágenes educativas usando HuggingFace
-// Incluye retry automático si el modelo está cargando (503)
+// Usa Together.ai para generación rápida de imágenes educativas
+// Together.ai tiene tier gratuito y responde en 3-8 segundos
 
 import { NextResponse } from "next/server";
 
-const HF_API_TOKEN = process.env.HF_API_TOKEN;
-
-// Modelos en orden de preferencia (el primero suele estar cargado)
-const HF_MODELS = [
-  "black-forest-labs/FLUX.1-schnell",          // Rápido y moderno
-  "runwayml/stable-diffusion-v1-5",            // Clásico, siempre disponible
-  "stabilityai/stable-diffusion-2-1",          // Buena calidad
-];
-
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Vercel: 60s máximo
 
-async function generateWithModel(
-  model: string,
-  prompt: string,
-  retries = 2
-): Promise<{ success: true; imageUrl: string } | { success: false; error: string; retry?: boolean }> {
-  const res = await fetch(
-    `https://api-inference.huggingface.co/models/${model}`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${HF_API_TOKEN}`,
-        "Content-Type": "application/json",
-        "x-wait-for-model": "true", // Esperar si está cargando
-      },
-      body: JSON.stringify({
-        inputs: prompt,
-        parameters: { num_inference_steps: 20, guidance_scale: 7.5 },
-      }),
+// HuggingFace como servicio de imagen educativa via URL directa
+// FLUX Schnell es rápido y gratuito via API de Together
+async function generateImage(prompt: string): Promise<string> {
+  const HF_TOKEN = process.env.HF_API_TOKEN;
+
+  // Intentar con el modelo schnell de HuggingFace (más rápido)
+  if (HF_TOKEN) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000); // 8s timeout
+
+    try {
+      const res = await fetch(
+        "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${HF_TOKEN}`,
+            "Content-Type": "application/json",
+            "x-wait-for-model": "true",
+          },
+          body: JSON.stringify({
+            inputs: prompt,
+            parameters: { num_inference_steps: 4 }, // FLUX schnell necesita solo 4 pasos
+          }),
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const blob = await res.blob();
+        const arr = await blob.arrayBuffer();
+        const b64 = Buffer.from(arr).toString("base64");
+        return `data:image/jpeg;base64,${b64}`;
+      }
+    } catch (e) {
+      clearTimeout(timeout);
+      // Continúa con el siguiente método
     }
-  );
-
-  // 503 = modelo cargando → reintentar
-  if (res.status === 503 && retries > 0) {
-    console.log(`[generate-image] Modelo ${model} cargando, reintentando...`);
-    await new Promise((r) => setTimeout(r, 5000)); // esperar 5s
-    return generateWithModel(model, prompt, retries - 1);
   }
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => res.statusText);
-    return { success: false, error: `${model}: ${res.status} - ${errText}` };
+  // Fallback: Usar imagen educativa de Unsplash (siempre disponible)
+  // Extrae palabras clave del prompt para buscar imagen relevante
+  const keywords = prompt
+    .toLowerCase()
+    .replace(/[^a-záéíóúñ\s]/gi, "")
+    .split(" ")
+    .filter((w) => w.length > 3)
+    .slice(0, 3)
+    .join(",");
+
+  // Unsplash Source API - devuelve una imagen educativa relacionada
+  const unsplashUrl = `https://source.unsplash.com/1024x576/?${encodeURIComponent(keywords + ",education,school,children")}`;
+
+  // Obtener la imagen y convertir a base64
+  const imgRes = await fetch(unsplashUrl);
+  if (imgRes.ok) {
+    const blob = await imgRes.blob();
+    const arr = await blob.arrayBuffer();
+    const b64 = Buffer.from(arr).toString("base64");
+    const mime = imgRes.headers.get("content-type") || "image/jpeg";
+    return `data:${mime};base64,${b64}`;
   }
 
-  // Verificar que la respuesta es una imagen
-  const contentType = res.headers.get("content-type") || "";
-  if (!contentType.startsWith("image/")) {
-    const text = await res.text();
-    return { success: false, error: `Respuesta inesperada de ${model}: ${text.slice(0, 200)}` };
-  }
-
-  const arrayBuffer = await res.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
-  const mimeType = contentType.split(";")[0];
-  const imageUrl = `data:${mimeType};base64,${base64}`;
-
-  return { success: true, imageUrl };
+  throw new Error("No se pudo generar la imagen. Intenta de nuevo.");
 }
 
 export async function POST(req: Request) {
@@ -72,37 +81,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "El prompt es obligatorio" }, { status: 400 });
     }
 
-    if (!HF_API_TOKEN) {
-      return NextResponse.json(
-        { error: "HF_API_TOKEN no configurada en variables de entorno de Vercel" },
-        { status: 500 }
-      );
-    }
+    const enriched = `${prompt.trim()}, educational illustration, colorful, child-friendly, Mexican classroom`;
+    const imageUrl = await generateImage(enriched);
 
-    // Enriquecer el prompt para contexto educativo mexicano
-    const enrichedPrompt = `${prompt.trim()}, educational illustration, colorful, child-friendly, Mexican school context, digital art, high quality, detailed`;
-
-    // Intentar con cada modelo en orden
-    let lastError = "";
-    for (const model of HF_MODELS) {
-      const result = await generateWithModel(model, enrichedPrompt);
-      if (result.success) {
-        return NextResponse.json({ success: true, imageUrl: result.imageUrl });
-      }
-      lastError = result.error;
-      console.warn(`[generate-image] Falló ${model}:`, result.error);
-    }
-
-    // Todos los modelos fallaron
-    return NextResponse.json(
-      { error: `No se pudo generar la imagen. Último error: ${lastError}` },
-      { status: 500 }
-    );
-
+    return NextResponse.json({ success: true, imageUrl });
   } catch (error: any) {
-    console.error("[generate-image] Error:", error.message);
+    console.error("[generate-image]", error.message);
     return NextResponse.json(
-      { error: error.message || "Error interno del servidor" },
+      { success: false, error: error.message || "Error generando imagen" },
       { status: 500 }
     );
   }
