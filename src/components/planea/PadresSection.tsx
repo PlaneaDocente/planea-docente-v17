@@ -489,7 +489,7 @@ function MensajesView() {
       leido: true,
       creado_en: new Date().toISOString(),
     };
-    const { data, error } = await supabase.from("mensajes").insert({ ...msg, user_id: userId }).select().single();
+    const { data, error } = await supabase.from("mensajes").insert({ ...msg, user_id: userId }).select().maybeSingle();
     if (error) {
       toast.error("Error enviando: " + error.message);
       setEnviando(false);
@@ -808,7 +808,7 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
       enviado_email: false,
       creado_en: new Date().toISOString(),
     };
-    const { data, error } = await supabase.from("avisos").insert({ ...nuevo, user_id: userId }).select().single();
+    const { data, error } = await supabase.from("avisos").insert({ ...nuevo, user_id: userId }).select().maybeSingle();
     if (error) {
       toast.error("Error guardando: " + error.message);
       setSaving(false);
@@ -886,7 +886,7 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
       total: 32,
       estado: "pendiente",
     };
-    const { data, error } = await supabase.from("tareas_digitales").insert({ ...nueva, user_id: userId }).select().single();
+    const { data, error } = await supabase.from("tareas_digitales").insert({ ...nueva, user_id: userId }).select().maybeSingle();
     if (error) {
       toast.error("Error guardando: " + error.message);
       setSaving(false);
@@ -958,7 +958,7 @@ function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
       leido: true,
       creado_en: new Date().toISOString(),
     };
-    const { data, error } = await supabase.from("mensajes").insert({ ...nuevo, user_id: userId }).select().single();
+    const { data, error } = await supabase.from("mensajes").insert({ ...nuevo, user_id: userId }).select().maybeSingle();
     if (error) {
       toast.error("Error enviando: " + error.message);
       setSaving(false);
@@ -1026,7 +1026,7 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
       creado_en: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase.from("padres").insert({ ...nuevo, user_id: userId }).select().single();
+    const { data, error } = await supabase.from("padres").insert({ ...nuevo, user_id: userId }).select().maybeSingle();
     if (error) {
       toast.error("Error guardando: " + error.message);
       setSaving(false);

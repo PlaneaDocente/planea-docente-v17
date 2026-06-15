@@ -419,7 +419,7 @@ function EscuelaManager() {
         .from("configuracion")
         .select("escuela")
         .eq("user_id", userId)
-        .single();
+        .maybeSingle();
       if (!cancelled) {
         if (data?.escuela) {
           const remoto = data.escuela as EscuelaData;
@@ -614,7 +614,7 @@ function DocenteManager() {
     async function load() {
       if (!userId) { setLoading(false); return; }
       setLoading(true);
-      const { data } = await supabase.from("configuracion").select("docente").eq("user_id", userId).single();
+      const { data } = await supabase.from("configuracion").select("docente").eq("user_id", userId).maybeSingle();
       if (!cancelled && data?.docente) {
         const remoto = data.docente as DocenteData;
         setDocente(remoto);

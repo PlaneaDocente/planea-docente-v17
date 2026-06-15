@@ -323,7 +323,7 @@ function NuevoAlumnoModal({ onClose, userId }: { onClose: () => void; userId: st
           activo: true,
         })
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) {
         if (error.code === "42P01") {
