@@ -4,8 +4,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Users, CalendarCheck, BookOpen, Target, BarChart3,
-  Camera, MessageSquare, Zap, Brain, Download,
-  CheckCircle2, Clock, TrendingUp,
+  MessageSquare, Zap, Brain, Camera, CheckCircle2, Clock, TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import StatCard from "./StatCard";
@@ -23,7 +22,6 @@ interface DashStats {
   mensajesNuevos: number;
 }
 
-// Adaptamos mockCalendario para MiniCalendar
 const calendarEvents = mockCalendario.map((event: any) => ({
   day: new Date(event.fecha).getDate(),
   title: event.titulo,
@@ -31,9 +29,16 @@ const calendarEvents = mockCalendario.map((event: any) => ({
 
 export default function DashboardSection() {
   const { setActiveSection, getPlanDisplayName, isPro, isTrial, user } = useAppStore();
-  const planName = getPlanDisplayName();
-  const pro = isPro();
-  const trial = isTrial();
+  const planName  = getPlanDisplayName();
+  const pro       = isPro();
+  const trial     = isTrial();
+
+  // Nombre real del usuario desde metadatos de Google OAuth o email
+  const userName =
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split("@")[0] ||
+    "Docente";
 
   const [stats, setStats] = useState<DashStats>({
     alumnos: 0, asistenciaHoy: 0, planeacionesPendientes: 0,
@@ -42,11 +47,13 @@ export default function DashboardSection() {
 
   useEffect(() => {
     const cargar = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const uid = user.id;
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return;
+      const uid = authUser.id;
       const hoy = new Date().toISOString().split("T")[0];
-      const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0];
+      const inicioMes = new Date(
+        new Date().getFullYear(), new Date().getMonth(), 1
+      ).toISOString().split("T")[0];
 
       const [
         { count: alumnos },
@@ -56,38 +63,51 @@ export default function DashboardSection() {
         { count: evaluaciones },
         { count: mensajes },
       ] = await Promise.all([
-        supabase.from("alumnos").select("*", { count: "exact", head: true }).eq("user_id", uid).eq("activo", true),
-        supabase.from("asistencia").select("*", { count: "exact", head: true }).eq("user_id", uid).eq("fecha", hoy),
-        supabase.from("planeaciones").select("*", { count: "exact", head: true }).eq("maestro_id", uid).eq("estado", "borrador"),
-        supabase.from("actividades").select("*", { count: "exact", head: true }).eq("user_id", uid).eq("estado", "activo"),
-        supabase.from("evaluaciones").select("*", { count: "exact", head: true }).eq("maestro_id", uid).gte("created_at", inicioMes),
-        supabase.from("mensajes").select("*", { count: "exact", head: true }).eq("user_id", uid).eq("leido", false),
+        supabase.from("alumnos").select("*", { count: "exact", head: true })
+          .eq("user_id", uid).eq("activo", true),
+        supabase.from("asistencia").select("*", { count: "exact", head: true })
+          .eq("user_id", uid).eq("fecha", hoy),
+        supabase.from("planeaciones").select("*", { count: "exact", head: true })
+          .eq("maestro_id", uid).eq("estado", "borrador"),
+        supabase.from("actividades").select("*", { count: "exact", head: true })
+          .eq("user_id", uid).eq("estado", "activo"),
+        supabase.from("evaluaciones").select("*", { count: "exact", head: true })
+          .eq("maestro_id", uid).gte("created_at", inicioMes),
+        supabase.from("mensajes").select("*", { count: "exact", head: true })
+          .eq("user_id", uid).eq("leido", false),
       ]);
 
       setStats({
-        alumnos: alumnos || 0,
-        asistenciaHoy: asistenciaHoy || 0,
-        planeacionesPendientes: planeaciones || 0,
-        actividadesActivas: actividades || 0,
-        evaluacionesMes: evaluaciones || 0,
-        mensajesNuevos: mensajes || 0,
+        alumnos:                alumnos      ?? 0,
+        asistenciaHoy:          asistenciaHoy ?? 0,
+        planeacionesPendientes: planeaciones  ?? 0,
+        actividadesActivas:     actividades   ?? 0,
+        evaluacionesMes:        evaluaciones  ?? 0,
+        mensajesNuevos:         mensajes      ?? 0,
       });
     };
     cargar();
   }, []);
 
   const statCards = [
-    { title: "Alumnos Registrados",      value: stats.alumnos,               subtitle: "Alumnos activos",      icon: Users,         color: "text-blue-600",    bgColor: "bg-blue-100 dark:bg-blue-950" },
-    { title: "Asistencia Hoy",            value: stats.asistenciaHoy,          subtitle: "Registros de hoy",     icon: CalendarCheck, color: "text-emerald-600", bgColor: "bg-emerald-100 dark:bg-emerald-950" },
-    { title: "Planeaciones Pendientes",   value: stats.planeacionesPendientes, subtitle: "Por completar",        icon: BookOpen,      color: "text-amber-600",   bgColor: "bg-amber-100 dark:bg-amber-950" },
-    { title: "Actividades Activas",       value: stats.actividadesActivas,     subtitle: "Esta semana",          icon: Target,        color: "text-purple-600",  bgColor: "bg-purple-100 dark:bg-purple-950" },
-    { title: "Evaluaciones",              value: stats.evaluacionesMes,        subtitle: "Este mes",             icon: BarChart3,     color: "text-rose-600",    bgColor: "bg-rose-100 dark:bg-rose-950" },
-    { title: "Mensajes sin leer",         value: stats.mensajesNuevos,         subtitle: "De padres",            icon: MessageSquare, color: "text-cyan-600",    bgColor: "bg-cyan-100 dark:bg-cyan-950" },
+    { title: "Alumnos Registrados",    value: stats.alumnos,               subtitle: "Alumnos activos",  icon: Users,         color: "text-blue-600",    bgColor: "bg-blue-100 dark:bg-blue-950" },
+    { title: "Asistencia Hoy",         value: stats.asistenciaHoy,          subtitle: "Registros de hoy", icon: CalendarCheck, color: "text-emerald-600", bgColor: "bg-emerald-100 dark:bg-emerald-950" },
+    { title: "Planeaciones Pendientes",value: stats.planeacionesPendientes, subtitle: "Por completar",    icon: BookOpen,      color: "text-amber-600",   bgColor: "bg-amber-100 dark:bg-amber-950" },
+    { title: "Actividades Activas",    value: stats.actividadesActivas,     subtitle: "Esta semana",      icon: Target,        color: "text-purple-600",  bgColor: "bg-purple-100 dark:bg-purple-950" },
+    { title: "Evaluaciones",           value: stats.evaluacionesMes,        subtitle: "Este mes",         icon: BarChart3,     color: "text-rose-600",    bgColor: "bg-rose-100 dark:bg-rose-950" },
+    { title: "Mensajes sin leer",      value: stats.mensajesNuevos,         subtitle: "De padres",        icon: MessageSquare, color: "text-cyan-600",    bgColor: "bg-cyan-100 dark:bg-cyan-950" },
   ];
 
   return (
     <div className="space-y-6">
-      <WelcomeBanner planName={planName} isPro={pro} isTrial={trial} />
+      <WelcomeBanner
+        planName={planName}
+        isPro={pro}
+        isTrial={trial}
+        userName={userName}
+        pendientes={stats.planeacionesPendientes}
+        mensajes={stats.mensajesNuevos}
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
         {statCards.map((s, i) => (
@@ -109,9 +129,16 @@ export default function DashboardSection() {
   );
 }
 
-function WelcomeBanner({ planName, isPro, isTrial }: { planName: string; isPro: boolean; isTrial: boolean }) {
+/* ─── WelcomeBanner ─── */
+function WelcomeBanner({
+  planName, isPro, isTrial, userName, pendientes, mensajes,
+}: {
+  planName: string; isPro: boolean; isTrial: boolean;
+  userName: string; pendientes: number; mensajes: number;
+}) {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Buenos días" : hour < 18 ? "Buenas tardes" : "Buenas noches";
+
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
@@ -123,7 +150,7 @@ function WelcomeBanner({ planName, isPro, isTrial }: { planName: string; isPro: 
           <h2 className="text-xl font-bold mb-1">{greeting}, {userName} 👋</h2>
           <p className="text-white/80 text-sm">
             {isPro
-              ? `${planName}${isTrial ? ' (Trial)' : ''}. Tienes ${mockStats.planeacionesPendientes} planeaciones pendientes y ${mockStats.mensajesNuevos} mensajes nuevos.`
+              ? `${planName}${isTrial ? " (Trial)" : ""}. Tienes ${pendientes} planeaciones pendientes y ${mensajes} mensajes nuevos.`
               : "Estás en el plan gratuito. Actualiza para desbloquear todas las herramientas."}
           </p>
         </div>
@@ -136,14 +163,15 @@ function WelcomeBanner({ planName, isPro, isTrial }: { planName: string; isPro: 
   );
 }
 
+/* ─── QuickActions ─── */
 function QuickActions({ setActiveSection }: { setActiveSection: (s: any) => void }) {
   const actions = [
     { label: "Tomar Asistencia", icon: CalendarCheck, color: "bg-emerald-500 hover:bg-emerald-600", section: "asistencia" },
-    { label: "Crear Planeación", icon: BookOpen, color: "bg-blue-500 hover:bg-blue-600", section: "planeacion" },
-    { label: "Nueva Actividad", icon: Target, color: "bg-purple-500 hover:bg-purple-600", section: "actividades" },
-    { label: "Subir Evidencia", icon: Camera, color: "bg-rose-500 hover:bg-rose-600", section: "evidencias" },
-    { label: "Generar Reporte", icon: BarChart3, color: "bg-amber-500 hover:bg-amber-600", section: "reportes" },
-    { label: "Mensaje a Padres", icon: MessageSquare, color: "bg-cyan-500 hover:bg-cyan-600", section: "padres" },
+    { label: "Crear Planeación", icon: BookOpen,      color: "bg-blue-500 hover:bg-blue-600",       section: "planeacion" },
+    { label: "Nueva Actividad",  icon: Target,        color: "bg-purple-500 hover:bg-purple-600",   section: "actividades" },
+    { label: "Subir Evidencia",  icon: Camera,        color: "bg-rose-500 hover:bg-rose-600",       section: "evidencias" },
+    { label: "Generar Reporte",  icon: BarChart3,     color: "bg-amber-500 hover:bg-amber-600",     section: "reportes" },
+    { label: "Mensaje a Padres", icon: MessageSquare, color: "bg-cyan-500 hover:bg-cyan-600",       section: "padres" },
   ];
 
   return (
@@ -172,13 +200,14 @@ function QuickActions({ setActiveSection }: { setActiveSection: (s: any) => void
   );
 }
 
+/* ─── RecentActivity ─── */
 function RecentActivity() {
   const items = [
     { icon: CheckCircle2, color: "text-emerald-500", text: "Asistencia registrada - 30/32 presentes", time: "Hace 2h" },
-    { icon: BookOpen, color: "text-blue-500", text: "Planeación semanal creada - Matemáticas", time: "Ayer" },
-    { icon: Target, color: "text-purple-500", text: "Tarea asignada - Fracciones", time: "Ayer" },
-    { icon: MessageSquare, color: "text-cyan-500", text: "Mensaje enviado a padres de familia", time: "Hace 2 días" },
-    { icon: Camera, color: "text-rose-500", text: "3 evidencias subidas al portafolio", time: "Hace 3 días" },
+    { icon: BookOpen,     color: "text-blue-500",    text: "Planeación semanal creada - Matemáticas", time: "Ayer" },
+    { icon: Target,       color: "text-purple-500",  text: "Tarea asignada - Fracciones",             time: "Ayer" },
+    { icon: MessageSquare,color: "text-cyan-500",    text: "Mensaje enviado a padres de familia",     time: "Hace 2 días" },
+    { icon: Camera,       color: "text-rose-500",    text: "3 evidencias subidas al portafolio",      time: "Hace 3 días" },
   ];
 
   return (
@@ -208,6 +237,7 @@ function RecentActivity() {
   );
 }
 
+/* ─── AIFeaturesBanner ─── */
 function AIFeaturesBanner() {
   const { setActiveSection } = useAppStore();
   return (
