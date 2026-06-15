@@ -181,39 +181,36 @@ function ImageGeneratorPanel({ onImageGenerated }: { onImageGenerated: (img: Gen
     }, 500);
 
     try {
-      const size = getSizeForPollinations(aspectRatio);
       const enhancedPrompt = enhancePrompt(prompt.trim());
-      const encodedPrompt = encodeURIComponent(enhancedPrompt);
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${size.width}&height=${size.height}&nologo=true&seed=${Date.now()}`;
 
-      // ✅ CORREGIDO: Pollinations.ai a veces bloquea preloads con CORS.
-      // Usamos fetch con no-cors para verificar que el servicio responde,
-      // y mostramos la imagen directamente sin esperar el preload.
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          // Timeout: igual mostramos la URL, el <img> en el DOM la cargará directamente
-          resolve();
-        }, 20000);
-        img.onload = () => { clearTimeout(timer); resolve(); };
-        img.onerror = () => {
-          clearTimeout(timer);
-          // Pollinations puede bloquear el preload pero la URL funciona en el DOM
-          // → resolver igualmente y mostrar la imagen
-          resolve();
-        };
-        img.src = pollinationsUrl;
+      // ✅ CORREGIDO: Usar HuggingFace (server-side) en lugar de Pollinations.ai
+      // Pollinations.ai devuelve 402 Payment Required — ya no es gratuito.
+      // La ruta /next_api/ai/generate-image usa HuggingFace SDXL desde el servidor.
+      const response = await fetch("/next_api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: enhancedPrompt }),
+        signal: AbortSignal.timeout(60000), // 60s para generación de imagen
       });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Error ${response.status} al generar imagen`);
+      }
+
+      const data = await response.json();
+      if (!data.success || !data.imageUrl) {
+        throw new Error(data.error || "No se recibió imagen del servidor");
+      }
 
       clearInterval(interval);
       setProgress(100);
 
-      setImageUrl(pollinationsUrl);
+      setImageUrl(data.imageUrl);
       onImageGenerated({
         id: `img-${Date.now()}`,
-        prompt: prompt.trim(), // Guardamos el prompt original, no el enhanced
-        imageUrl: pollinationsUrl,
+        prompt: prompt.trim(),
+        imageUrl: data.imageUrl,
         aspectRatio,
         timestamp: Date.now(),
       });

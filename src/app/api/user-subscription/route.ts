@@ -62,6 +62,26 @@ export async function GET(req: NextRequest) {
       if (!subError && subData) subscription = subData;
     }
 
+    // 3b. Verificar expiración de trial
+    // Si el estado es "trialing" pero fecha_prueba_fin ya pasó → marcar como expirado
+    if (subscription && subscription.estado === "trialing" && subscription.fecha_prueba_fin) {
+      const trialEnd = new Date(subscription.fecha_prueba_fin);
+      if (trialEnd < new Date()) {
+        subscription.estado = "expired";
+        // Actualizar en BD de forma asíncrona (sin bloquear la respuesta)
+        if (admin) {
+          admin.from("subscriptions")
+            .update({ estado: "past_due" })
+            .eq("id", subscription.id)
+            .then(() => {
+              admin.from("profiles")
+                .update({ is_pro: false, plan_actual: null })
+                .eq("id", userId);
+            });
+        }
+      }
+    }
+
     // 4. Si hay suscripción, obtener el plan
     if (subscription?.plan_id) {
       const planClient = admin || userClient;
