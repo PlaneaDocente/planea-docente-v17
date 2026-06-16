@@ -62,11 +62,44 @@ export default function ReportesSection() {
 
   if (loading) {
     return (
-      <div className="space-y-5">
+      <div className="space-y-5" id="reporte-print-area">
         <div className="h-40 animate-pulse bg-muted rounded-2xl" />
       </div>
     );
   }
+
+  // ── Exportar PDF via browser print ──────────────────────────────────────────
+  const handleExportPDF = () => {
+    const el = document.getElementById("reporte-print-area");
+    if (!el) { toast.error("No hay datos para exportar"); return; }
+    const win = window.open("", "_blank", "width=850,height=700");
+    if (!win) { toast.error("Activa ventanas emergentes e intenta de nuevo"); return; }
+    win.document.write(
+      `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+      <title>Reporte PlaneaDocente</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:24px;color:#111}
+        h1{color:#6d28d9;font-size:18px;border-bottom:2px solid #6d28d9;padding-bottom:6px}
+        table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px}
+        th{background:#6d28d9;color:#fff;padding:6px 10px;text-align:left}
+        td{padding:5px 10px;border-bottom:1px solid #e5e7eb}
+        tr:nth-child(even){background:#f9fafb}
+        .footer{margin-top:20px;font-size:10px;color:#9ca3af;text-align:right}
+      </style></head><body>
+      <h1>Reporte PlaneaDocente — NEM</h1>
+      <p style="font-size:11px;color:#6b7280">
+        Generado: ${new Date().toLocaleDateString("es-MX",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}
+      </p>
+      ${el.innerHTML}
+      <div class="footer">PlaneaDocente.com</div>
+      </body></html>`
+    );
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 600);
+    toast.success("Preparando PDF — usa Ctrl+P para guardar como PDF");
+  };
+
 
   return (
     <div className="space-y-5">
@@ -105,7 +138,7 @@ export default function ReportesSection() {
           ))}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="gap-2 text-xs" onClick={() => toast.info("Exportar PDF — próximamente")}>
+          <Button size="sm" variant="outline" className="gap-2 text-xs" onClick={handleExportPDF}>
             <Download className="w-3.5 h-3.5" /> PDF
           </Button>
         </div>

@@ -698,7 +698,12 @@ function ModalForm({
             min={0}
             max={form.total}
             value={form.entregadas}
-            onChange={(e) => handleChange("entregadas", parseInt(e.target.value) || 0)}
+            onFocus={(e) => e.target.select()}
+            onClick={(e) => (e.target as HTMLInputElement).select()}
+            onChange={(e) => {
+              const v = e.target.value;
+              handleChange("entregadas", v === "" ? 0 : Math.max(0, parseInt(v) || 0));
+            }}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
@@ -710,7 +715,12 @@ function ModalForm({
             type="number"
             min={1}
             value={form.total}
-            onChange={(e) => handleChange("total", parseInt(e.target.value) || 1)}
+            onFocus={(e) => e.target.select()}
+            onClick={(e) => (e.target as HTMLInputElement).select()}
+            onChange={(e) => {
+              const v = e.target.value;
+              handleChange("total", v === "" ? 1 : Math.max(1, parseInt(v) || 1));
+            }}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
