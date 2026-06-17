@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -12,11 +12,11 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { motion, AnimatePresence } from "framer-motion";
 
-/* ═══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    TIPOS NEM (Nueva Escuela Mexicana)
-   ═══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 type TipoActividad = "tarea" | "proyecto" | "clase";
-type NivelDesempeño = "inicial" | "en_desarrollo" | "suficiente" | "sobresaliente";
+type NivelDesempeÃ±o = "inicial" | "en_desarrollo" | "suficiente" | "sobresaliente";
 
 interface Actividad {
   id: string;
@@ -32,37 +32,37 @@ interface Actividad {
   evidencias: string;
   criterios_evaluacion: string;
   indicadores_logro?: string;
-  nivel_desempeño?: NivelDesempeño;
+  nivel_desempeÃ±o?: NivelDesempeÃ±o;
   entregadas: number;
   total: number;
   user_id?: string;
   creado_en: string;
 }
 
-/* ── Constantes NEM ───────────────────────────────────────────────────── */
+/* â”€â”€ Constantes NEM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const CAMPOS_FORMATIVOS_NEM = [
   "Lenguajes",
-  "Saberes y Pensamiento Científico",
-  "Ética, Naturaleza y Sociedades",
+  "Saberes y Pensamiento CientÃ­fico",
+  "Ã‰tica, Naturaleza y Sociedades",
   "De lo Humano y lo Comunitario",
   "Artes y Creatividad",
-  "Educación Socioemocional",
+  "EducaciÃ³n Socioemocional",
 ];
 
 const NIVELES_DESEMPENO = [
-  { value: "inicial" as NivelDesempeño, label: "Inicial", color: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200" },
-  { value: "en_desarrollo" as NivelDesempeño, label: "En desarrollo", color: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200" },
-  { value: "suficiente" as NivelDesempeño, label: "Suficiente", color: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200" },
-  { value: "sobresaliente" as NivelDesempeño, label: "Sobresaliente", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200" },
+  { value: "inicial" as NivelDesempeÃ±o, label: "Inicial", color: "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 border-rose-200" },
+  { value: "en_desarrollo" as NivelDesempeÃ±o, label: "En desarrollo", color: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 border-amber-200" },
+  { value: "suficiente" as NivelDesempeÃ±o, label: "Suficiente", color: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200" },
+  { value: "sobresaliente" as NivelDesempeÃ±o, label: "Sobresaliente", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200" },
 ];
 
-const GRUPOS = ["3°A", "3°B", "4°A", "4°B", "5°A", "5°B", "6°A", "6°B"];
+const GRUPOS = ["3Â°A", "3Â°B", "4Â°A", "4Â°B", "5Â°A", "5Â°B", "6Â°A", "6Â°B"];
 
 const STORAGE_KEY = "pd_actividades_nem_v1";
 
-/* ═══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    UTILIDADES
-   ═══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function generarId() {
   return `act-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -90,9 +90,9 @@ function setLocalStore<T>(key: string, value: T) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    COMPONENTE PRINCIPAL
-   ═══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 export default function ActividadesSection() {
   const [actividades, setActividades] = useState<Actividad[]>([]);
   const [activeTab, setActiveTab] = useState<TipoActividad | "todas">("todas");
@@ -105,7 +105,7 @@ export default function ActividadesSection() {
   const [userId, setUserId] = useState<string | null>(null);
   const [useSupabase, setUseSupabase] = useState(true);
 
-  /* ── Cargar datos: intenta Supabase primero, fallback a localStorage ──── */
+  /* â”€â”€ Cargar datos: intenta Supabase primero, fallback a localStorage â”€â”€â”€â”€ */
   useEffect(() => {
     const load = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -138,14 +138,14 @@ export default function ActividadesSection() {
     load();
   }, [useSupabase]);
 
-  /* ── Guardar en localStorage cuando cambian ───────────────────────────── */
+  /* â”€â”€ Guardar en localStorage cuando cambian â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   useEffect(() => {
     if (!loading && actividades.length > 0) {
       setLocalStore(STORAGE_KEY, actividades);
     }
   }, [actividades, loading]);
 
-  /* ── Filtrado ─────────────────────────────────────────────────────────── */
+  /* â”€â”€ Filtrado â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const filtradas = actividades.filter((a) => {
     const coincideTab = activeTab === "todas" ? true : a.tipo === activeTab;
     const q = busqueda.toLowerCase();
@@ -157,7 +157,7 @@ export default function ActividadesSection() {
     return coincideTab && coincideBusqueda;
   });
 
-  /* ── Handlers ─────────────────────────────────────────────────────────── */
+  /* â”€â”€ Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const handleNueva = () => {
     setModalMode("crear");
     setEditingId(null);
@@ -173,7 +173,7 @@ export default function ActividadesSection() {
         setActividades(actualizadas);
         toast.success("Actividad actualizada correctamente");
 
-        // Sync Supabase si está disponible
+        // Sync Supabase si estÃ¡ disponible
         if (userId && useSupabase) {
           await supabase.from("actividades").update(data).eq("id", editingId);
         }
@@ -222,7 +222,7 @@ export default function ActividadesSection() {
 
   const actividadParaEditar = editingId ? actividades.find((a) => a.id === editingId) : undefined;
 
-  /* ── Tabs ─────────────────────────────────────────────────────────────── */
+  /* â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const tabs = [
     { id: "todas" as const, label: "Todas", count: actividades.length },
     { id: "tarea" as const, label: "Tareas", count: actividades.filter((a) => a.tipo === "tarea").length },
@@ -302,7 +302,7 @@ export default function ActividadesSection() {
             const Icon = a.tipo === "tarea" ? Target : a.tipo === "proyecto" ? FolderOpen : Users;
             const colorBg = a.tipo === "tarea" ? "bg-blue-100 dark:bg-blue-950" : a.tipo === "proyecto" ? "bg-purple-100 dark:bg-purple-950" : "bg-emerald-100 dark:bg-emerald-950";
             const colorText = a.tipo === "tarea" ? "text-blue-600" : a.tipo === "proyecto" ? "text-purple-600" : "text-emerald-600";
-            const nivelInfo = a.nivel_desempeño ? NIVELES_DESEMPENO.find((n) => n.value === a.nivel_desempeño) : null;
+            const nivelInfo = a.nivel_desempeÃ±o ? NIVELES_DESEMPENO.find((n) => n.value === a.nivel_desempeÃ±o) : null;
             const isVencida = new Date(a.fecha_entrega) < new Date() && pct < 100;
 
             return (
@@ -403,7 +403,7 @@ export default function ActividadesSection() {
         )}
       </div>
 
-      {/* ═══ MODAL ═══ */}
+      {/* â•â•â• MODAL â•â•â• */}
       <AnimatePresence>
         {modalOpen && (
           <motion.div
@@ -449,7 +449,7 @@ export default function ActividadesSection() {
         )}
       </AnimatePresence>
 
-      {/* Confirmación eliminar */}
+      {/* ConfirmaciÃ³n eliminar */}
       <AnimatePresence>
         {confirmDelete && (
           <motion.div
@@ -467,8 +467,8 @@ export default function ActividadesSection() {
               <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center mx-auto mb-4">
                 <Trash2 className="w-6 h-6 text-red-600" />
               </div>
-              <h3 className="font-semibold text-lg mb-2 text-center">¿Eliminar actividad?</h3>
-              <p className="text-sm text-muted-foreground mb-5 text-center">Esta acción no se puede deshacer. La actividad se eliminará permanentemente.</p>
+              <h3 className="font-semibold text-lg mb-2 text-center">Â¿Eliminar actividad?</h3>
+              <p className="text-sm text-muted-foreground mb-5 text-center">Esta acciÃ³n no se puede deshacer. La actividad se eliminarÃ¡ permanentemente.</p>
               <div className="flex gap-3 justify-end">
                 <Button type="button" variant="outline" size="sm" onClick={() => setConfirmDelete(null)}>
                   Cancelar
@@ -485,9 +485,9 @@ export default function ActividadesSection() {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    FORMULARIO MODAL
-   ═══════════════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 function ModalForm({
   mode,
   initialData,
@@ -512,7 +512,7 @@ function ModalForm({
     evidencias: initialData?.evidencias ?? "",
     criterios_evaluacion: initialData?.criterios_evaluacion ?? "",
     indicadores_logro: initialData?.indicadores_logro ?? "",
-    nivel_desempeño: initialData?.nivel_desempeño ?? "en_desarrollo",
+    nivel_desempeÃ±o: initialData?.nivel_desempeÃ±o ?? "en_desarrollo",
     entregadas: initialData?.entregadas ?? 0,
     total: initialData?.total ?? 25,
   }));
@@ -526,7 +526,7 @@ function ModalForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly) return;
-    if (!form.titulo.trim()) { toast.error("El título es obligatorio"); return; }
+    if (!form.titulo.trim()) { toast.error("El tÃ­tulo es obligatorio"); return; }
     if (!form.materia.trim()) { toast.error("La materia es obligatoria"); return; }
     onSave(form);
   };
@@ -535,7 +535,7 @@ function ModalForm({
     <form onSubmit={handleSubmit} className="p-5 space-y-5">
       <div className="grid sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2">
-          <label className="block text-xs font-medium mb-1">Título *</label>
+          <label className="block text-xs font-medium mb-1">TÃ­tulo *</label>
           <input
             readOnly={isReadOnly}
             value={form.titulo}
@@ -554,9 +554,9 @@ function ModalForm({
             onChange={(e) => handleChange("tipo", e.target.value as TipoActividad)}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           >
-            <option value="tarea">📝 Tarea</option>
-            <option value="proyecto">📁 Proyecto</option>
-            <option value="clase">👥 En Clase</option>
+            <option value="tarea">ðŸ“ Tarea</option>
+            <option value="proyecto">ðŸ“ Proyecto</option>
+            <option value="clase">ðŸ‘¥ En Clase</option>
           </select>
         </div>
 
@@ -628,7 +628,7 @@ function ModalForm({
             value={form.aprendizajes_esperados}
             onChange={(e) => handleChange("aprendizajes_esperados", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20"
-            placeholder="Ej: Identifica elementos bióticos y abióticos..."
+            placeholder="Ej: Identifica elementos biÃ³ticos y abiÃ³ticos..."
           />
         </div>
 
@@ -640,19 +640,19 @@ function ModalForm({
             value={form.evidencias}
             onChange={(e) => handleChange("evidencias", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20"
-            placeholder="Ej: Infografía digital, cuestionario..."
+            placeholder="Ej: InfografÃ­a digital, cuestionario..."
           />
         </div>
 
         <div>
-          <label className="block text-xs font-medium mb-1">Criterios de evaluación</label>
+          <label className="block text-xs font-medium mb-1">Criterios de evaluaciÃ³n</label>
           <textarea
             readOnly={isReadOnly}
             rows={2}
             value={form.criterios_evaluacion}
             onChange={(e) => handleChange("criterios_evaluacion", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20"
-            placeholder="Ej: Precisión 40%, calidad visual 30%..."
+            placeholder="Ej: PrecisiÃ³n 40%, calidad visual 30%..."
           />
         </div>
 
@@ -667,11 +667,11 @@ function ModalForm({
         </div>
 
         <div>
-          <label className="block text-xs font-medium mb-1">Nivel de desempeño</label>
+          <label className="block text-xs font-medium mb-1">Nivel de desempeÃ±o</label>
           <select
             disabled={isReadOnly}
-            value={form.nivel_desempeño}
-            onChange={(e) => handleChange("nivel_desempeño", e.target.value as NivelDesempeño)}
+            value={form.nivel_desempeÃ±o}
+            onChange={(e) => handleChange("nivel_desempeÃ±o", e.target.value as NivelDesempeÃ±o)}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           >
             {NIVELES_DESEMPENO.map((n) => <option key={n.value} value={n.value}>{n.label}</option>)}
@@ -679,14 +679,14 @@ function ModalForm({
         </div>
 
         <div className="sm:col-span-2">
-          <label className="block text-xs font-medium mb-1">Descripción general</label>
+          <label className="block text-xs font-medium mb-1">DescripciÃ³n general</label>
           <textarea
             readOnly={isReadOnly}
             rows={3}
             value={form.descripcion}
             onChange={(e) => handleChange("descripcion", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 resize-none focus:outline-none focus:ring-2 focus:ring-primary/20"
-            placeholder="Describe la actividad, objetivos y metodología..."
+            placeholder="Describe la actividad, objetivos y metodologÃ­a..."
           />
         </div>
 
@@ -740,3 +740,4 @@ function ModalForm({
     </form>
   );
 }
+

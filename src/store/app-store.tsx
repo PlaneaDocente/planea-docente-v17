@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -6,9 +6,9 @@ import { useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    TIPOS
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 export type PlanType = "gratuito" | "basico" | "profesional" | "institucional";
 
 export interface SubscriptionData {
@@ -32,7 +32,7 @@ export interface AppState {
   isLoading: boolean;
   authError: string | null;
 
-  /* UI / Navegación */
+  /* UI / NavegaciÃ³n */
   activeSection: string;
   sidebarOpen: boolean;
 
@@ -61,12 +61,12 @@ export interface AppState {
   canUseFeature: (featurePlan: PlanType) => boolean;
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PLAN LIMITS (NEM Compatible)
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 export const PLAN_LIMITS: Record<PlanType, { maxAlumnos: number; maxGrupos: number; iaGeneraciones: number; label: string }> = {
   gratuito: { maxAlumnos: 15, maxGrupos: 1, iaGeneraciones: 5, label: "Gratuito" },
-  basico:   { maxAlumnos: 35, maxGrupos: 3, iaGeneraciones: 50, label: "Básico" },
+  basico:   { maxAlumnos: 35, maxGrupos: 3, iaGeneraciones: 50, label: "BÃ¡sico" },
   profesional: { maxAlumnos: 9999, maxGrupos: 10, iaGeneraciones: 500, label: "Profesional" },
   institucional: { maxAlumnos: 99999, maxGrupos: 999, iaGeneraciones: 9999, label: "Institucional" },
 };
@@ -75,9 +75,9 @@ function normalizeText(text: string): string {
   return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    STORE
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -95,7 +95,7 @@ export const useAppStore = create<AppState>()(
       subscriptionError: null,
       isRefreshingSubscription: false,
 
-      /* ── Auth ── */
+      /* â”€â”€ Auth â”€â”€ */
       setUser: (user: User | null) => {
         set({ user, currentUser: user, isAuthenticated: !!user });
       },
@@ -108,7 +108,7 @@ export const useAppStore = create<AppState>()(
         set({ currentUser: user, user, isAuthenticated: !!user });
       },
 
-      /* ── UI / Navegación ── */
+      /* â”€â”€ UI / NavegaciÃ³n â”€â”€ */
       setActiveSection: (section: string) => {
         console.log("[AppStore] Navegando a:", section);
         set({ activeSection: section });
@@ -122,7 +122,7 @@ export const useAppStore = create<AppState>()(
       setSidebarOpenFn: (open: boolean) => set({ sidebarOpen: open }), // alias
       toggleSidebar: () => set((state: AppState) => ({ sidebarOpen: !state.sidebarOpen })),
 
-      /* ── Logout ── */
+      /* â”€â”€ Logout â”€â”€ */
       logout: async () => {
         await supabase.auth.signOut();
         set({
@@ -136,7 +136,7 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      /* ── Init Session ── */
+      /* â”€â”€ Init Session â”€â”€ */
       initSession: async () => {
         try {
           const { data, error } = await supabase.auth.getSession();
@@ -147,18 +147,18 @@ export const useAppStore = create<AppState>()(
               session: data.session, user: data.session.user,
               currentUser: data.session.user, isAuthenticated: true, isLoading: false,
             });
-            // Refrescar suscripción en background
+            // Refrescar suscripciÃ³n en background
             setTimeout(() => get().refreshSubscription(), 500);
           } else {
             set({ isLoading: false });
           }
         } catch (err: any) {
           console.error("[AppStore] initSession error:", err?.message);
-          set({ isLoading: false, authError: err?.message || "Error de autenticación" });
+          set({ isLoading: false, authError: err?.message || "Error de autenticaciÃ³n" });
         }
       },
 
-      /* ── Refresh Subscription (ANTI-ATASCO DEFINITIVO) ── */
+      /* â”€â”€ Refresh Subscription (ANTI-ATASCO DEFINITIVO) â”€â”€ */
       refreshSubscription: async () => {
         const state = get();
         const token = state.session?.access_token;
@@ -168,7 +168,7 @@ export const useAppStore = create<AppState>()(
           return;
         }
 
-        // Anti-atasco: si ya está en progreso, no repetir
+        // Anti-atasco: si ya estÃ¡ en progreso, no repetir
         if (state.isRefreshingSubscription) {
           console.log("[AppStore] Refresh ya en progreso, skipping");
           return;
@@ -176,7 +176,7 @@ export const useAppStore = create<AppState>()(
 
         set({ isRefreshingSubscription: true, subscriptionError: null });
 
-        // Timeout de seguridad: SIEMPRE liberar después de 8s
+        // Timeout de seguridad: SIEMPRE liberar despuÃ©s de 8s
         const safetyTimeout = setTimeout(() => {
           console.warn("[AppStore] Safety timeout: liberando lock");
           set({ isRefreshingSubscription: false });
@@ -227,14 +227,14 @@ export const useAppStore = create<AppState>()(
           }
         } catch (err: any) {
           console.error("[AppStore] Error:", err?.message);
-          set({ subscriptionError: err?.message || "Error de conexión" });
+          set({ subscriptionError: err?.message || "Error de conexiÃ³n" });
         } finally {
           clearTimeout(safetyTimeout);
           set({ isRefreshingSubscription: false });
         }
       },
 
-      /* ── Helpers ── */
+      /* â”€â”€ Helpers â”€â”€ */
       getPlanDisplayName: () => {
         const plan = get().currentPlan;
         return PLAN_LIMITS[plan]?.label || "Gratuito";
@@ -265,9 +265,9 @@ export const useAppStore = create<AppState>()(
   )
 );
 
-/* ═══════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    PROVIDER (para layout.tsx)
-   ═══════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const initSession = useAppStore((s) => s.initSession);
   const refreshSubscription = useAppStore((s) => s.refreshSubscription);
@@ -279,8 +279,8 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   }, [initSession]);
 
   // Escuchar cambios de auth
-  // ✅ FIX: Usar ref para evitar que SIGNED_IN dispare refreshSubscription múltiples veces.
-  // Supabase JS v2 emite SIGNED_IN en cada token refresh automático.
+  // âœ… FIX: Usar ref para evitar que SIGNED_IN dispare refreshSubscription mÃºltiples veces.
+  // Supabase JS v2 emite SIGNED_IN en cada token refresh automÃ¡tico.
   // Con el ref, solo procesamos el primer SIGNED_IN por session de usuario.
   const signedInUserRef = useRef<string | null>(null);
 
@@ -289,7 +289,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       console.log("[AppStore] Auth event:", event);
 
       if (event === "SIGNED_IN" && session?.user) {
-        // Solo actualizar estado — siempre
+        // Solo actualizar estado â€” siempre
         useAppStore.setState({
           session, user: session.user,
           currentUser: session.user, isAuthenticated: true,
@@ -312,7 +312,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     return () => { listener.subscription.unsubscribe(); };
   }, [refreshSubscription]);
 
-  // Refrescar suscripción cuando cambia el usuario
+  // Refrescar suscripciÃ³n cuando cambia el usuario
   const lastUserRef = useRef<string | null>(null);
   useEffect(() => {
     const userId = user?.id;
