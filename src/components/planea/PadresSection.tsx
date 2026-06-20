@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,7 +18,7 @@ import {
   type TareaDigital, type Mensaje, type Padre, type Alumno,
 } from "./planeadocente-store";
 
-/* ═════════════════════ CONSTANTES ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• CONSTANTES â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 const TABS = [
   { id: "avisos" as TabId, label: "Avisos", icon: Megaphone },
@@ -46,7 +46,7 @@ function getEstadoBadge(estado: TareaEstado) {
   return map[estado];
 }
 
-/* ─── AUTH HOOK ─── */
+/* â”€â”€â”€ AUTH HOOK â”€â”€â”€ */
 
 function useAuthUser(): string | null {
   const [userId, setUserId] = useState<string | null>(null);
@@ -62,22 +62,22 @@ function useAuthUser(): string | null {
   return userId;
 }
 
-/* ─── HELPERS COMUNICACIÓN ─── */
+/* â”€â”€â”€ HELPERS COMUNICACIÃ“N â”€â”€â”€ */
 
 function openWhatsApp(phone: string, message: string) {
   const clean = phone.replace(/\D/g, "");
-  if (!clean) { toast.error("Teléfono inválido"); return; }
+  if (!clean) { toast.error("TelÃ©fono invÃ¡lido"); return; }
   const url = `https://wa.me/${clean}?text=${encodeURIComponent(message)}`;
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function openEmail(email: string, subject: string, body: string) {
-  if (!email || !email.includes("@")) { toast.error("Email inválido"); return; }
+  if (!email || !email.includes("@")) { toast.error("Email invÃ¡lido"); return; }
   const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   window.open(url, "_blank");
 }
 
-/* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• COMPONENTE PRINCIPAL â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 export default function PadresSection() {
   const [activeTab, setActiveTab] = useState<TabId>("avisos");
@@ -144,7 +144,7 @@ export default function PadresSection() {
   );
 }
 
-/* ═════════════════════ AVISOS (SUPABASE) ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• AVISOS (SUPABASE) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function AvisosView() {
   const userId = useAuthUser();
@@ -183,7 +183,7 @@ function AvisosView() {
   });
 
   const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar este aviso?")) return;
+    if (!confirm("Â¿Eliminar este aviso?")) return;
     if (userId) {
       const { error } = await supabase.from("avisos").delete().eq("id", id).eq("user_id", userId);
       if (error) { toast.error(error.message); return; }
@@ -193,10 +193,10 @@ function AvisosView() {
   };
 
   const handleSendWhatsApp = async (aviso: Aviso) => {
-    if (!userId) { toast.error("Inicia sesión."); return; }
+    if (!userId) { toast.error("Inicia sesiÃ³n."); return; }
     const { data: padres } = await supabase.from("padres").select("*").eq("user_id", userId).eq("grupo", aviso.grupo);
     if (!padres?.length) { toast.error("No hay padres registrados en este grupo."); return; }
-    const msg = `📢 *${aviso.titulo}*\n\n${aviso.mensaje}\n\n_Fecha: ${formatDate(aviso.fecha)}_\n_Enviado desde PlaneaDocente_`;
+    const msg = `ðŸ“¢ *${aviso.titulo}*\n\n${aviso.mensaje}\n\n_Fecha: ${formatDate(aviso.fecha)}_\n_Enviado desde PlaneaDocente_`;
     padres.forEach((p) => openWhatsApp(p.telefono, msg));
     if (userId) {
       await supabase.from("avisos").update({ enviado_whatsapp: true }).eq("id", aviso.id).eq("user_id", userId);
@@ -206,10 +206,10 @@ function AvisosView() {
   };
 
   const handleSendEmail = async (aviso: Aviso) => {
-    if (!userId) { toast.error("Inicia sesión."); return; }
+    if (!userId) { toast.error("Inicia sesiÃ³n."); return; }
     const { data: padres } = await supabase.from("padres").select("*").eq("user_id", userId).eq("grupo", aviso.grupo);
     if (!padres?.length) { toast.error("No hay padres registrados en este grupo."); return; }
-    const subject = `📢 ${aviso.titulo}`;
+    const subject = `ðŸ“¢ ${aviso.titulo}`;
     const body = `${aviso.mensaje}\n\nFecha: ${formatDate(aviso.fecha)}\nEnviado desde PlaneaDocente`;
     padres.forEach((p) => openEmail(p.email, subject, body));
     if (userId) {
@@ -234,7 +234,7 @@ function AvisosView() {
           <Bell className="w-6 h-6" />
           <h3 className="font-bold text-lg">Sistema de Avisos a Padres</h3>
         </div>
-        <p className="text-white/80 text-sm">Envía avisos instantáneos a todos los padres de familia del grupo por WhatsApp o correo.</p>
+        <p className="text-white/80 text-sm">EnvÃ­a avisos instantÃ¡neos a todos los padres de familia del grupo por WhatsApp o correo.</p>
       </motion.div>
 
       <div className="flex flex-col sm:flex-row gap-3">
@@ -252,7 +252,7 @@ function AvisosView() {
         {filtered.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <Megaphone className="w-10 h-10 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No hay avisos que coincidan con tu búsqueda.</p>
+            <p className="text-sm">No hay avisos que coincidan con tu bÃºsqueda.</p>
           </div>
         )}
         {filtered.map((a, i) => {
@@ -273,7 +273,7 @@ function AvisosView() {
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   <div className="flex items-center gap-1 text-xs text-emerald-600">
                     <Eye className="w-3 h-3" />
-                    <span>{a.leidos}/{a.total} leídos</span>
+                    <span>{a.leidos}/{a.total} leÃ­dos</span>
                   </div>
                   <div className="flex gap-1">
                     <button onClick={() => handleSendWhatsApp(a)} className={`p-1.5 rounded-lg transition-colors ${a.enviado_whatsapp ? "bg-emerald-100 text-emerald-600" : "bg-muted text-muted-foreground hover:text-green-600 hover:bg-green-50"}`} title="Enviar por WhatsApp">
@@ -299,7 +299,7 @@ function AvisosView() {
   );
 }
 
-/* ═════════════════════ TAREAS DIGITALES (SUPABASE) ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TAREAS DIGITALES (SUPABASE) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function TareasDigitalesView() {
   const userId = useAuthUser();
@@ -330,7 +330,7 @@ function TareasDigitalesView() {
   const filtered = tareas.filter((t) => t.titulo.toLowerCase().includes(search.toLowerCase()) || t.materia.toLowerCase().includes(search.toLowerCase()));
 
   const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar esta tarea?")) return;
+    if (!confirm("Â¿Eliminar esta tarea?")) return;
     if (userId) {
       const { error } = await supabase.from("tareas_digitales").delete().eq("id", id).eq("user_id", userId);
       if (error) { toast.error(error.message); return; }
@@ -340,10 +340,10 @@ function TareasDigitalesView() {
   };
 
   const handleSendWhatsApp = async (tarea: TareaDigital) => {
-    if (!userId) { toast.error("Inicia sesión."); return; }
+    if (!userId) { toast.error("Inicia sesiÃ³n."); return; }
     const { data: padres } = await supabase.from("padres").select("*").eq("user_id", userId).eq("grupo", tarea.grupo);
     if (!padres?.length) { toast.error("No hay padres registrados en este grupo."); return; }
-    const msg = `📚 *Nueva Tarea: ${tarea.titulo}*\n\nMateria: ${tarea.materia}\n${tarea.descripcion}\n\n📅 Entrega: ${formatDate(tarea.fecha_entrega)}\n_Enviado desde PlaneaDocente_`;
+    const msg = `ðŸ“š *Nueva Tarea: ${tarea.titulo}*\n\nMateria: ${tarea.materia}\n${tarea.descripcion}\n\nðŸ“… Entrega: ${formatDate(tarea.fecha_entrega)}\n_Enviado desde PlaneaDocente_`;
     padres.forEach((p) => openWhatsApp(p.telefono, msg));
     await supabase.from("tareas_digitales").update({ enviadas: padres.length, estado: "enviada" }).eq("id", tarea.id).eq("user_id", userId);
     setTareas((prev) => prev.map((t) => t.id === tarea.id ? { ...t, enviadas: padres.length, estado: "enviada" } : t));
@@ -386,7 +386,7 @@ function TareasDigitalesView() {
                     <span className={`text-xs px-2 py-0.5 rounded-full border ${estado.className}`}>{estado.label}</span>
                     <span className="text-xs text-muted-foreground">{t.grupo}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground mb-1">{t.materia} · Entrega: {formatDate(t.fecha_entrega)}</p>
+                  <p className="text-xs text-muted-foreground mb-1">{t.materia} Â· Entrega: {formatDate(t.fecha_entrega)}</p>
                   <p className="text-sm text-foreground">{t.descripcion}</p>
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
@@ -415,12 +415,12 @@ function TareasDigitalesView() {
   );
 }
 
-/* ═════════════════════ MENSAJES (SUPABASE + REALTIME) ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• MENSAJES (SUPABASE + REALTIME) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function MensajesView() {
   const userId = useAuthUser();
   const [mensajes, setMensajes] = useStoreItem(store.mensajes);
-  const [grupoSeleccionado, setGrupoSeleccionado] = useState("3°A");
+  const [grupoSeleccionado, setGrupoSeleccionado] = useState("3Â°A");
   const [newMsg, setNewMsg] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -545,7 +545,7 @@ function MensajesView() {
             <div className="p-8 text-center text-muted-foreground">
               <Users className="w-10 h-10 mx-auto mb-2 opacity-50" />
               <p className="text-sm">No hay mensajes en este grupo.</p>
-              <p className="text-xs">Sé el primero en enviar uno.</p>
+              <p className="text-xs">SÃ© el primero en enviar uno.</p>
             </div>
           )}
           {filtered.map((m) => {
@@ -558,9 +558,9 @@ function MensajesView() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-semibold">{isMaestro ? "Tú" : m.nombre_remitente}</span>
+                      <span className="text-xs font-semibold">{isMaestro ? "TÃº" : m.nombre_remitente}</span>
                       <span className="text-[10px] text-muted-foreground">{timeAgo(m.creado_en)}</span>
-                      {!m.leido && m.remitente === "padre" && <span className="w-2 h-2 bg-red-500 rounded-full" title="No leído" />}
+                      {!m.leido && m.remitente === "padre" && <span className="w-2 h-2 bg-red-500 rounded-full" title="No leÃ­do" />}
                     </div>
                     <p className="text-sm text-foreground mt-0.5">{m.texto}</p>
                   </div>
@@ -584,7 +584,7 @@ function MensajesView() {
   );
 }
 
-/* ═════════════════════ PADRES DE FAMILIA (SUPABASE) ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• PADRES DE FAMILIA (SUPABASE) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function PadresView() {
   const userId = useAuthUser();
@@ -620,7 +620,7 @@ function PadresView() {
   });
 
   const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar este padre de familia?")) return;
+    if (!confirm("Â¿Eliminar este padre de familia?")) return;
     if (userId) {
       const { error } = await supabase.from("padres").delete().eq("id", id).eq("user_id", userId);
       if (error) { toast.error(error.message); return; }
@@ -641,7 +641,7 @@ function PadresView() {
   };
 
   const handleCopyPhone = (phone: string) => {
-    navigator.clipboard.writeText(phone).then(() => toast.success("Teléfono copiado."));
+    navigator.clipboard.writeText(phone).then(() => toast.success("TelÃ©fono copiado."));
   };
 
   if (loading) {
@@ -748,7 +748,7 @@ function PadresView() {
   );
 }
 
-/* ═════════════════════ MODAL DINÁMICO ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• MODAL DINÃMICO â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function DynamicModal({ type, onClose }: { type: TabId; onClose: () => void }) {
   switch (type) {
@@ -781,7 +781,7 @@ function ModalWrapper({ title, icon: Icon, children, onClose }: { title: string;
   );
 }
 
-/* ─── Nuevo Aviso ─── */
+/* â”€â”€â”€ Nuevo Aviso â”€â”€â”€ */
 
 function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
   const userId = useAuthUser();
@@ -794,7 +794,7 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
 
   const handleSave = async () => {
     if (!titulo.trim() || !mensaje.trim()) { toast.error("Completa todos los campos obligatorios."); return; }
-    if (!userId) { toast.error("Inicia sesión para guardar."); return; }
+    if (!userId) { toast.error("Inicia sesiÃ³n para guardar."); return; }
     setSaving(true);
     const nuevo: Omit<Aviso, "id"> = {
       titulo: titulo.trim(),
@@ -824,8 +824,8 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
     <ModalWrapper title="Nuevo Aviso" icon={Megaphone} onClose={onClose}>
       <div className="space-y-4">
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Título *</label>
-          <input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ej: Reunión de padres" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">TÃ­tulo *</label>
+          <input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ej: ReuniÃ³n de padres" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Mensaje *</label>
@@ -860,7 +860,7 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-/* ─── Nueva Tarea ─── */
+/* â”€â”€â”€ Nueva Tarea â”€â”€â”€ */
 
 function NuevaTareaModal({ onClose }: { onClose: () => void }) {
   const userId = useAuthUser();
@@ -874,7 +874,7 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
 
   const handleSave = async () => {
     if (!titulo.trim() || !materia.trim() || !fechaEntrega) { toast.error("Completa todos los campos obligatorios."); return; }
-    if (!userId) { toast.error("Inicia sesión para guardar."); return; }
+    if (!userId) { toast.error("Inicia sesiÃ³n para guardar."); return; }
     setSaving(true);
     const nueva: Omit<TareaDigital, "id"> = {
       titulo: titulo.trim(),
@@ -902,13 +902,13 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
     <ModalWrapper title="Nueva Tarea Digital" icon={BookOpen} onClose={onClose}>
       <div className="space-y-4">
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Título *</label>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">TÃ­tulo *</label>
           <input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ej: Ejercicios de fracciones" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Materia *</label>
-            <input value={materia} onChange={(e) => setMateria(e.target.value)} placeholder="Ej: Matemáticas" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+            <input value={materia} onChange={(e) => setMateria(e.target.value)} placeholder="Ej: MatemÃ¡ticas" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Fecha de entrega *</label>
@@ -916,7 +916,7 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Descripción</label>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">DescripciÃ³n</label>
           <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Instrucciones de la tarea..." rows={3} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary resize-none" />
         </div>
         <div>
@@ -937,7 +937,7 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-/* ─── Nuevo Mensaje ─── */
+/* â”€â”€â”€ Nuevo Mensaje â”€â”€â”€ */
 
 function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
   const userId = useAuthUser();
@@ -948,7 +948,7 @@ function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
 
   const handleSave = async () => {
     if (!texto.trim()) { toast.error("Escribe un mensaje."); return; }
-    if (!userId) { toast.error("Inicia sesión para guardar."); return; }
+    if (!userId) { toast.error("Inicia sesiÃ³n para guardar."); return; }
     setSaving(true);
     const nuevo: Omit<Mensaje, "id"> = {
       texto: texto.trim(),
@@ -995,7 +995,7 @@ function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-/* ─── Nuevo Padre ─── */
+/* â”€â”€â”€ Nuevo Padre â”€â”€â”€ */
 
 function NuevoPadreModal({ onClose }: { onClose: () => void }) {
   const userId = useAuthUser();
@@ -1010,7 +1010,7 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
 
   const handleSave = async () => {
     if (!nombre.trim() || !nombreHijo.trim()) { toast.error("Nombre del padre y del hijo son obligatorios."); return; }
-    if (!userId) { toast.error("Inicia sesión para guardar."); return; }
+    if (!userId) { toast.error("Inicia sesiÃ³n para guardar."); return; }
 
     const alumno = alumnos.find((a) => a.nombre.toLowerCase().includes(nombreHijo.toLowerCase()) || nombreHijo.toLowerCase().includes(a.nombre.toLowerCase()));
 
@@ -1062,19 +1062,19 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-4">
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nombre completo del padre/madre *</label>
-          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Juan Pérez García" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Juan PÃ©rez GarcÃ­a" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nombre del hijo/a *</label>
-          <input value={nombreHijo} onChange={(e) => setNombreHijo(e.target.value)} placeholder="Ej: Ana Pérez" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+          <input value={nombreHijo} onChange={(e) => setNombreHijo(e.target.value)} placeholder="Ej: Ana PÃ©rez" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Teléfono (WhatsApp)</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">TelÃ©fono (WhatsApp)</label>
             <input value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="Ej: 5215512345678" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Correo electrónico</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Correo electrÃ³nico</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Ej: padre@email.com" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
           </div>
         </div>
@@ -1087,7 +1087,7 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
         <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-3">
           <p className="text-xs text-blue-700 dark:text-blue-300">
             <Info className="w-3 h-3 inline mr-1" />
-            El teléfono debe incluir código de país (ej: 52 para México). Se usará para enviar mensajes por WhatsApp.
+            El telÃ©fono debe incluir cÃ³digo de paÃ­s (ej: 52 para MÃ©xico). Se usarÃ¡ para enviar mensajes por WhatsApp.
           </p>
         </div>
         <div className="flex gap-3 pt-2">

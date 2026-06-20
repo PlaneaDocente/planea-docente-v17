@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
-/* ═════════════════════ TIPOS ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TIPOS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 interface Alumno {
   id: string;
@@ -59,12 +59,12 @@ interface Observacion {
 type AlumnoTab = "registro" | "historial" | "tutores" | "observaciones";
 
 const GRUPOS = [
-  "1° A", "1° B", "1° C", "1° D",
-  "2° A", "2° B", "2° C", "2° D",
-  "3° A", "3° B", "3° C", "3° D",
-  "4° A", "4° B", "4° C", "4° D",
-  "5° A", "5° B", "5° C", "5° D",
-  "6° A", "6° B", "6° C", "6° D",
+  "1Â° A", "1Â° B", "1Â° C", "1Â° D",
+  "2Â° A", "2Â° B", "2Â° C", "2Â° D",
+  "3Â° A", "3Â° B", "3Â° C", "3Â° D",
+  "4Â° A", "4Â° B", "4Â° C", "4Â° D",
+  "5Â° A", "5Â° B", "5Â° C", "5Â° D",
+  "6Â° A", "6Â° B", "6Â° C", "6Â° D",
 ];
 
 const TABS: { id: AlumnoTab; label: string; icon: React.ElementType }[] = [
@@ -74,16 +74,16 @@ const TABS: { id: AlumnoTab; label: string; icon: React.ElementType }[] = [
   { id: "observaciones", label: "Observaciones", icon: MessageSquare },
 ];
 
-/* ═════════════════════ UTILIDADES ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• UTILIDADES â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function formatDate(dateStr: string | undefined): string {
-  if (!dateStr) return "—";
+  if (!dateStr) return "â€”";
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-/* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• COMPONENTE PRINCIPAL â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 export default function AlumnosSection() {
   const [activeTab, setActiveTab] = useState<AlumnoTab>("registro");
@@ -131,7 +131,7 @@ export default function AlumnosSection() {
   );
 }
 
-/* ═════════════════════ REGISTRO (CRUD SUPABASE) ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• REGISTRO (CRUD SUPABASE) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function RegistroView() {
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
@@ -158,12 +158,12 @@ function RegistroView() {
       if (error) {
         console.error("[Alumnos] Error cargando:", error);
         if (error.code === "42P01") {
-          toast.error("La tabla de alumnos no existe. Ejecuta el SQL de configuración en Supabase.");
+          toast.error("La tabla de alumnos no existe. Ejecuta el SQL de configuraciÃ³n en Supabase.");
         } else {
           toast.error("Error al cargar alumnos: " + error.message);
         }
       } else {
-        // Cast explícito para resolver TS 2345
+        // Cast explÃ­cito para resolver TS 2345
         setAlumnos((data as Alumno[]) || []);
       }
     } catch (err) {
@@ -184,7 +184,7 @@ function RegistroView() {
   });
 
   const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar este alumno? También se eliminarán sus tutores y observaciones.")) return;
+    if (!confirm("Â¿Eliminar este alumno? TambiÃ©n se eliminarÃ¡n sus tutores y observaciones.")) return;
     try {
       await supabase.from("tutores").delete().eq("alumno_id", id);
       await supabase.from("observaciones").delete().eq("alumno_id", id);
@@ -303,12 +303,12 @@ function NuevoAlumnoModal({ onClose, userId }: { onClose: () => void; userId: st
   const [nombre, setNombre] = useState("");
   const [apellidos, setApellidos] = useState("");
   const [grupo, setGrupo] = useState(GRUPOS[0]);
-  const [grado, setGrado] = useState("1°");
+  const [grado, setGrado] = useState("1Â°");
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     if (!nombre.trim()) { toast.error("El nombre es obligatorio."); return; }
-    if (!userId) { toast.error("Debes iniciar sesión."); return; }
+    if (!userId) { toast.error("Debes iniciar sesiÃ³n."); return; }
 
     setSaving(true);
     try {
@@ -327,7 +327,7 @@ function NuevoAlumnoModal({ onClose, userId }: { onClose: () => void; userId: st
 
       if (error) {
         if (error.code === "42P01") {
-          toast.error("❌ La tabla 'alumnos' no existe. Ejecuta el SQL de configuración.");
+          toast.error("âŒ La tabla 'alumnos' no existe. Ejecuta el SQL de configuraciÃ³n.");
         } else {
           throw error;
         }
@@ -365,7 +365,7 @@ function NuevoAlumnoModal({ onClose, userId }: { onClose: () => void; userId: st
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grado</label>
             <select value={grado} onChange={(e) => setGrado(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-              {["1°", "2°", "3°", "4°", "5°", "6°"].map((g) => <option key={g} value={g}>{g}</option>)}
+              {["1Â°", "2Â°", "3Â°", "4Â°", "5Â°", "6Â°"].map((g) => <option key={g} value={g}>{g}</option>)}
             </select>
           </div>
         </div>
@@ -381,7 +381,7 @@ function NuevoAlumnoModal({ onClose, userId }: { onClose: () => void; userId: st
   );
 }
 
-/* ═════════════════════ HISTORIAL ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• HISTORIAL â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function HistorialView() {
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
@@ -440,7 +440,7 @@ function HistorialView() {
                 </div>
                 <div>
                   <h4 className="text-sm font-semibold">{a.nombre} {a.apellidos}</h4>
-                  <p className="text-xs text-muted-foreground">{a.grupo} · Ver historial completo</p>
+                  <p className="text-xs text-muted-foreground">{a.grupo} Â· Ver historial completo</p>
                 </div>
                 <History className="w-4 h-4 text-muted-foreground ml-auto" />
               </div>
@@ -476,7 +476,7 @@ function AlumnoHistorial({ alumnoId, onBack, alumnos, tutores, observaciones }: 
       </button>
       <div className="bg-gradient-to-r from-cyan-500 to-blue-600 rounded-2xl p-5 text-white">
         <h3 className="font-bold text-lg">{alumno.nombre} {alumno.apellidos}</h3>
-        <p className="text-white/80 text-sm">{alumno.grupo} · {alumno.activo ? "Activo" : "Inactivo"}</p>
+        <p className="text-white/80 text-sm">{alumno.grupo} Â· {alumno.activo ? "Activo" : "Inactivo"}</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -516,7 +516,7 @@ function AlumnoHistorial({ alumnoId, onBack, alumnos, tutores, observaciones }: 
   );
 }
 
-/* ═════════════════════ TUTORES (CRUD SUPABASE) ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TUTORES (CRUD SUPABASE) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function TutoresView() {
   const [tutores, setTutores] = useState<Tutor[]>([]);
@@ -556,7 +556,7 @@ function TutoresView() {
   );
 
   const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar este tutor?")) return;
+    if (!confirm("Â¿Eliminar este tutor?")) return;
     try {
       const { error } = await supabase.from("tutores").delete().eq("id", id);
       if (error) throw error;
@@ -633,9 +633,9 @@ function NuevoTutorModal({ onClose, alumnos, userId }: { onClose: () => void; al
 
   const handleSave = async () => {
     if (!alumnoId || !nombre.trim()) { toast.error("Alumno y nombre del tutor son obligatorios."); return; }
-    if (!userId) { toast.error("Debes iniciar sesión."); return; }
+    if (!userId) { toast.error("Debes iniciar sesiÃ³n."); return; }
     const alumno = alumnos.find((a) => a.id === alumnoId);
-    if (!alumno) { toast.error("Alumno no válido."); return; }
+    if (!alumno) { toast.error("Alumno no vÃ¡lido."); return; }
 
     setSaving(true);
     try {
@@ -651,7 +651,7 @@ function NuevoTutorModal({ onClose, alumnos, userId }: { onClose: () => void; al
 
       if (error) {
         if (error.code === "42P01") {
-          toast.error("❌ La tabla 'tutores' no existe. Ejecuta el SQL de configuración.");
+          toast.error("âŒ La tabla 'tutores' no existe. Ejecuta el SQL de configuraciÃ³n.");
         } else {
           throw error;
         }
@@ -677,7 +677,7 @@ function NuevoTutorModal({ onClose, alumnos, userId }: { onClose: () => void; al
         </div>
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nombre del tutor *</label>
-          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: María de la Luz Garcia" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: MarÃ­a de la Luz Garcia" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -685,12 +685,12 @@ function NuevoTutorModal({ onClose, alumnos, userId }: { onClose: () => void; al
             <input value={parentesco} onChange={(e) => setParentesco(e.target.value)} placeholder="Ej: Madre" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Teléfono</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">TelÃ©fono</label>
             <input value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="Ej: 3221569887" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
           </div>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Correo electrónico</label>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Correo electrÃ³nico</label>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Ej: tutor@email.com" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <div className="flex gap-3 pt-2">
@@ -705,7 +705,7 @@ function NuevoTutorModal({ onClose, alumnos, userId }: { onClose: () => void; al
   );
 }
 
-/* ═════════════════════ OBSERVACIONES (CRUD SUPABASE) ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• OBSERVACIONES (CRUD SUPABASE) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function ObservacionesView() {
   const [observaciones, setObservaciones] = useState<Observacion[]>([]);
@@ -745,12 +745,12 @@ function ObservacionesView() {
   );
 
   const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar esta observación?")) return;
+    if (!confirm("Â¿Eliminar esta observaciÃ³n?")) return;
     try {
       const { error } = await supabase.from("observaciones").delete().eq("id", id);
       if (error) throw error;
       setObservaciones((prev) => prev.filter((o) => o.id !== id));
-      toast.success("Observación eliminada.");
+      toast.success("ObservaciÃ³n eliminada.");
     } catch (err: any) {
       toast.error("Error: " + err.message);
     }
@@ -765,10 +765,10 @@ function ObservacionesView() {
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input type="text" placeholder="Buscar observación..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
+          <input type="text" placeholder="Buscar observaciÃ³n..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
-          <Plus className="w-4 h-4" /> Nueva Observación
+          <Plus className="w-4 h-4" /> Nueva ObservaciÃ³n
         </Button>
       </div>
 
@@ -816,8 +816,8 @@ function NuevaObservacionModal({ onClose, alumnos, userId }: { onClose: () => vo
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
-    if (!alumnoId || !descripcion.trim()) { toast.error("Alumno y descripción son obligatorios."); return; }
-    if (!userId) { toast.error("Debes iniciar sesión."); return; }
+    if (!alumnoId || !descripcion.trim()) { toast.error("Alumno y descripciÃ³n son obligatorios."); return; }
+    if (!userId) { toast.error("Debes iniciar sesiÃ³n."); return; }
     const alumno = alumnos.find((a) => a.id === alumnoId);
     if (!alumno) return;
 
@@ -834,12 +834,12 @@ function NuevaObservacionModal({ onClose, alumnos, userId }: { onClose: () => vo
 
       if (error) {
         if (error.code === "42P01") {
-          toast.error("❌ La tabla 'observaciones' no existe. Ejecuta el SQL de configuración.");
+          toast.error("âŒ La tabla 'observaciones' no existe. Ejecuta el SQL de configuraciÃ³n.");
         } else {
           throw error;
         }
       } else {
-        toast.success("Observación guardada correctamente.");
+        toast.success("ObservaciÃ³n guardada correctamente.");
         onClose();
       }
     } catch (err: any) {
@@ -850,7 +850,7 @@ function NuevaObservacionModal({ onClose, alumnos, userId }: { onClose: () => vo
   };
 
   return (
-    <ModalWrapper title="Nueva Observación" icon={MessageSquare} onClose={onClose}>
+    <ModalWrapper title="Nueva ObservaciÃ³n" icon={MessageSquare} onClose={onClose}>
       <div className="space-y-4">
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Alumno *</label>
@@ -873,14 +873,14 @@ function NuevaObservacionModal({ onClose, alumnos, userId }: { onClose: () => vo
           </div>
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Descripción *</label>
-          <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Describe la observación..." rows={4} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary resize-none" />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">DescripciÃ³n *</label>
+          <textarea value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Describe la observaciÃ³n..." rows={4} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary resize-none" />
         </div>
         <div className="flex gap-3 pt-2">
           <Button variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button className="flex-1 gap-2" onClick={handleSave} disabled={saving}>
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-            {saving ? "Guardando..." : "Guardar Observación"}
+            {saving ? "Guardando..." : "Guardar ObservaciÃ³n"}
           </Button>
         </div>
       </div>
@@ -888,7 +888,7 @@ function NuevaObservacionModal({ onClose, alumnos, userId }: { onClose: () => vo
   );
 }
 
-/* ═════════════════════ MODAL WRAPPER ═════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• MODAL WRAPPER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function ModalWrapper({ title, icon: Icon, children, onClose }: { title: string; icon: React.ElementType; children: React.ReactNode; onClose: () => void }) {
   return (
