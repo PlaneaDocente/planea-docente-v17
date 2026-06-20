@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1300,7 +1300,7 @@ function InfoManager() {
   const [dbCounts, setDbCounts] = useState<Record<string, number>>({});
   const [loadingCounts, setLoadingCounts] = useState(false);
 
-  const calcularTamaÃ±o = useMemo(() => {
+  const calcularTamano = useMemo(() => {
     let total = 0;
     Object.keys(localStorage).forEach((k) => {
       if (k.startsWith("pd_") || k.startsWith("planeadocente_") || k === STORAGE_CONFIG) {
@@ -1368,10 +1368,10 @@ function InfoManager() {
         </div>
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Espacio utilizado en localStorage</span>
-          <Badge variant="secondary" className="text-xs">{calcularTamaÃ±o} KB</Badge>
+          <Badge variant="secondary" className="text-xs">{calcularTamano} KB</Badge>
         </div>
         <div className="mt-2 w-full bg-muted rounded-full h-2">
-          <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(parseFloat(calcularTamaÃ±o) / 50 * 100, 100)}%` }} />
+          <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(parseFloat(calcularTamano) / 50 * 100, 100)}%` }} />
         </div>
         <p className="text-[10px] text-muted-foreground mt-1">LÃ­mite recomendado: ~5 MB por dominio</p>
       </div>
