@@ -1,647 +1,461 @@
-﻿"use client";
+"use client";
+// RUTA: src/components/planea/HerramientasIASection.tsx
 
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
-  Wand2, Sparkles, ImageIcon, Download, RefreshCw,
-  CheckCircle2, AlertCircle, Loader2, X, ZoomIn,
+  Sparkles, Download, Save, Images, Wand2,
+  AlertCircle, Loader2, Trash2, Eye, Zap,
+  GraduationCap, BookOpen, Palette, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { useAppStore } from "@/store/app-store";
 
-type AspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:2";
-
-interface GeneratedImage {
+interface GalleryImage {
   id: string;
-  prompt: string;
-  imageUrl: string;
-  aspectRatio: AspectRatio;
-  timestamp: number;
+  original_prompt: string;
+  enhanced_prompt: string;
+  image_url: string;
+  education_level: string;
+  nem_field: string;
+  style: string;
+  format: string;
+  created_at: string;
 }
 
-const aspectRatioOptions: { value: AspectRatio; label: string; desc: string }[] = [
-  { value: "1:1", label: "Cuadrado", desc: "1:1 · 1024×1024" },
-  { value: "16:9", label: "Horizontal", desc: "16:9 · 1920×1080" },
-  { value: "9:16", label: "Vertical", desc: "9:16 · 1080×1920" },
-  { value: "4:3", label: "Estándar", desc: "4:3 · 1024×768" },
-  { value: "3:2", label: "Foto", desc: "3:2 · 1080×720" },
+const LEVELS = ["Preescolar","Primaria 1°-3°","Primaria 4°-6°","Secundaria","Educación Especial","Multigrado","General"];
+const NEM_FIELDS = ["Lenguajes","Saberes y Pensamiento Científico","Ética, Naturaleza y Sociedades","De lo Humano y lo Comunitario","General"];
+const STYLES = [
+  { value:"infantil cartoon",                         label:"🎨 Infantil" },
+  { value:"colorful educational illustration",        label:"🖌️ Ilustración colorida" },
+  { value:"school didactic poster",                   label:"📚 Escolar didáctico" },
+  { value:"classroom wall poster",                    label:"📋 Cartel escolar" },
+  { value:"black and white coloring page children",   label:"✏️ Para colorear" },
+  { value:"educational comic strip",                  label:"💬 Cómic educativo" },
+  { value:"watercolor children illustration",         label:"🎭 Acuarela" },
+  { value:"minimalist flat design educational",       label:"⬜ Minimalista" },
 ];
-
-const promptSuggestions = [
-  "Niños aprendiendo matemáticas en un salón de clases colorido",
-  "Maestra explicando ciencias naturales con experimentos",
-  "Mapa conceptual de la Revolución Mexicana ilustrado",
-  "Diagrama del ciclo del agua para primaria",
-  "Ilustración de fracciones con pizzas y pasteles",
-  "Salón de clases moderno con tecnología educativa",
+const FORMATS = [
+  { value:"horizontal", label:"📐 Horizontal 16:9", w:1920, h:1080 },
+  { value:"cuadrado",   label:"⬛ Cuadrado 1:1",   w:1024, h:1024 },
+  { value:"vertical",   label:"📱 Vertical 9:16",  w:1080, h:1920 },
+  { value:"portada",    label:"📄 Portada 4:3",    w:1280, h:960  },
 ];
-
-// Clave para localStorage
-const STORAGE_KEY = "planeadocente_gallery";
-
-// Función auxiliar para tamaños de Pollinations.ai
-const getSizeForPollinations = (ratio: AspectRatio) => {
-  switch (ratio) {
-    case "1:1": return { width: 1024, height: 1024 };
-    case "16:9": return { width: 1024, height: 576 };
-    case "9:16": return { width: 576, height: 1024 };
-    case "4:3": return { width: 1024, height: 768 };
-    case "3:2": return { width: 1024, height: 683 };
-    default: return { width: 1024, height: 1024 };
-  }
-};
-
-// Mejorar el prompt para Pollinations (más coherente con educación)
-const enhancePrompt = (prompt: string) => {
-  return `educational illustration, Mexican school, NEM style, watercolor, children learning, inclusive, no text, no letters: ${prompt}`;
+const TEMPLATES = [
+  "Niños trabajando en equipo en un proyecto escolar",
+  "Cartel sobre el cuidado del agua para primaria",
+  "Lámina educativa sobre las partes de la planta",
+  "Dibujo para colorear de animales de la granja",
+  "Imagen sobre cultura de paz e inclusión en el aula",
+  "Niños leyendo en la biblioteca escolar",
+  "Actividad de matemáticas con frutas y números",
+  "Cartel de valores para el salón de clases",
+  "Proyecto comunitario Nueva Escuela Mexicana",
+  "Efeméride escolar: Independencia de México",
+  "Trabajo colaborativo entre alumnos de primaria",
+  "Cuidado del medio ambiente en la comunidad",
+  "Portada para planeación didáctica de primaria",
+  "Niños aprendiendo sobre la cultura mexicana",
+  "Ilustración de los derechos de los niños",
+];
+const MONTHLY_LIMITS: Record<string,number> = {
+  gratuito:5, trialing:20, basico:20, profesional:100, institucional:500
 };
 
 export default function HerramientasIASection() {
-  const [activeTab, setActiveTab] = useState<"generador" | "galeria">("generador");
-  const [gallery, setGallery] = useState<GeneratedImage[]>([]);
-  const [previewImage, setPreviewImage] = useState<GeneratedImage | null>(null);
+  const { currentPlan } = useAppStore();
+  const [tab, setTab]                   = useState<"generator"|"gallery">("generator");
+  const [userPrompt, setUserPrompt]     = useState("");
+  const [enhancedPrompt, setEnhancedPrompt] = useState("");
+  const [level, setLevel]               = useState("Primaria 1°-3°");
+  const [nemField, setNemField]         = useState("General");
+  const [style, setStyle]               = useState(STYLES[0].value);
+  const [format, setFormat]             = useState("horizontal");
+  const [imageUrl, setImageUrl]         = useState("");
+  const [imageLoading, setImageLoading] = useState(false);
+  const [generating, setGenerating]     = useState(false);
+  const [enhancing, setEnhancing]       = useState(false);
+  const [progress, setProgress]         = useState(0);
+  const [gallery, setGallery]           = useState<GalleryImage[]>([]);
+  const [monthlyCount, setMonthlyCount] = useState(0);
+  const [userId, setUserId]             = useState<string|null>(null);
 
-  // Cargar galería desde localStorage al iniciar
+  const plan   = currentPlan || "gratuito";
+  const limit  = MONTHLY_LIMITS[plan] || 5;
+  const fmt    = FORMATS.find(f => f.value === format) || FORMATS[0];
+  const atLimit = monthlyCount >= limit;
+
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as GeneratedImage[];
-        setGallery(parsed);
-      }
-    } catch (e) {
-      console.error("Error cargando galería:", e);
-    }
+    const load = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setUserId(user.id);
+      const startMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      const [{ data: imgs }, { count }] = await Promise.all([
+        supabase.from("generated_school_images").select("*").eq("user_id",user.id).order("created_at",{ascending:false}).limit(30),
+        supabase.from("generated_school_images").select("*",{count:"exact",head:true}).eq("user_id",user.id).gte("created_at",startMes),
+      ]);
+      if (imgs) setGallery(imgs);
+      setMonthlyCount(count || 0);
+    };
+    load();
   }, []);
 
-  // Guardar galería en localStorage cada vez que cambie
-  useEffect(() => {
+  const handleEnhance = async () => {
+    if (!userPrompt.trim()) { toast.error("Escribe una descripción primero"); return; }
+    setEnhancing(true);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(gallery));
-    } catch (e) {
-      console.error("Error guardando galería:", e);
-    }
-  }, [gallery]);
+      const res  = await fetch("/next_api/ai/enhance-prompt", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ prompt:userPrompt, level, nemField, style }),
+      });
+      const data = await res.json();
+      if (data.enhancedPrompt) { setEnhancedPrompt(data.enhancedPrompt); toast.success("Prompt mejorado con IA ✨"); }
+    } catch { toast.error("Error al mejorar el prompt"); }
+    setEnhancing(false);
+  };
 
-  const tabs = [
-    { id: "generador", label: "🎨 Generador de Imágenes" },
-    { id: "galeria", label: `🖼️ Galería (${gallery.length})` },
-  ] as const;
+  const handleGenerate = async () => {
+    if (!userPrompt.trim()) { toast.error("Describe la imagen que necesitas"); return; }
+    if (atLimit) { toast.error(`Límite de ${limit} imágenes alcanzado. Actualiza tu plan.`); return; }
+    setGenerating(true); setImageUrl(""); setProgress(10);
+    const iv = setInterval(() => setProgress(p => Math.min(p+5,82)), 600);
+    try {
+      const res  = await fetch("/next_api/ai/generate-image", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ prompt: enhancedPrompt||userPrompt, level, nemField, style, width:fmt.w, height:fmt.h }),
+      });
+      const data = await res.json();
+      clearInterval(iv);
+      if (!data.success) { toast.error(data.error||"Error al generar"); setGenerating(false); setProgress(0); return; }
+      setProgress(90); setImageUrl(data.imageUrl); setImageLoading(true);
+      setMonthlyCount(c => c+1);
+    } catch { clearInterval(iv); toast.error("Error de conexión"); setGenerating(false); setProgress(0); }
+  };
 
-  const handleImageGenerated = (img: GeneratedImage) => {
-    setGallery((prev) => [img, ...prev]);
+  const handleSave = async () => {
+    if (!imageUrl||!userId) { toast.error("No hay imagen para guardar"); return; }
+    const { error } = await supabase.from("generated_school_images").insert({
+      user_id:userId, original_prompt:userPrompt, enhanced_prompt:enhancedPrompt||userPrompt,
+      image_url:imageUrl, education_level:level, grade:"General", nem_field:nemField, style, format,
+    });
+    if (error) { toast.error("Error al guardar"); return; }
+    toast.success("¡Guardada en tu galería! ✅");
+    const { data } = await supabase.from("generated_school_images").select("*").eq("user_id",userId).order("created_at",{ascending:false}).limit(30);
+    if (data) setGallery(data);
+  };
+
+  const handleDownload = (url?: string) => {
+    const src = url||imageUrl; if (!src) return;
+    const a = document.createElement("a");
+    a.href=src; a.download=`planeadocente-ia-${Date.now()}.jpg`; a.target="_blank";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    toast.success("Descargando imagen...");
+  };
+
+  const handleDelete = async (id: string) => {
+    await supabase.from("generated_school_images").delete().eq("id",id);
+    setGallery(g => g.filter(img => img.id!==id));
+    toast.success("Imagen eliminada");
   };
 
   return (
     <div className="space-y-5">
-      <HeroBanner />
 
-      <div className="flex gap-2 flex-wrap">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setActiveTab(t.id)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-              activeTab === t.id
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "bg-card border border-border text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {activeTab === "generador" && (
-        <ImageGeneratorPanel onImageGenerated={handleImageGenerated} />
-      )}
-      {activeTab === "galeria" && (
-        <GalleryPanel
-          images={gallery}
-          onPreview={setPreviewImage}
-          onClear={() => setGallery([])}
-        />
-      )}
-
-      <AnimatePresence>
-        {previewImage && (
-          <ImagePreviewModal image={previewImage} onClose={() => setPreviewImage(null)} />
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function HeroBanner() {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-700 rounded-2xl p-6 text-white shadow-xl"
-    >
-      <div className="flex flex-col md:flex-row items-center gap-5">
-        <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center shrink-0">
-          <Wand2 className="w-8 h-8" />
-        </div>
-        <div className="flex-1 text-center md:text-left">
-          <h2 className="text-2xl font-bold mb-1">Herramientas de IA para Docentes</h2>
-          <p className="text-white/80 text-sm">
-            Genera imágenes educativas con inteligencia artificial para enriquecer tus clases y materiales didácticos.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 shrink-0">
-          {["🎨 Imágenes educativas", "⚡ Generación instantánea", "📚 Material didáctico"].map((f) => (
-            <div key={f} className="flex items-center gap-2 bg-white/20 rounded-xl px-3 py-1.5 text-xs">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-              <span>{f}</span>
+      {/* Header */}
+      <motion.div initial={{opacity:0,y:-8}} animate={{opacity:1,y:0}}
+        className="bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 rounded-2xl p-6 text-white shadow-lg">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center shrink-0">
+              <Sparkles className="w-7 h-7" />
             </div>
+            <div>
+              <h2 className="text-lg font-bold">Herramientas de IA para Docentes</h2>
+              <p className="text-white/80 text-sm mt-0.5">Genera imágenes educativas con IA para enriquecer tus clases y materiales didácticos.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 bg-white/20 rounded-xl px-4 py-2 shrink-0">
+            <Zap className="w-4 h-4" />
+            <span className="text-sm font-bold">{monthlyCount}/{limit}</span>
+            <span className="text-xs text-white/80">imágenes este mes</span>
+          </div>
+        </div>
+        <div className="flex gap-4 mt-4 text-xs text-white/70">
+          {["Imágenes educativas","Generación instantánea","Material didáctico"].map(t => (
+            <span key={t} className="flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5"/>{t}</span>
           ))}
         </div>
-      </div>
-    </motion.div>
-  );
-}
+      </motion.div>
 
-function ImageGeneratorPanel({ onImageGenerated }: { onImageGenerated: (img: GeneratedImage) => void }) {
-  const [prompt, setPrompt] = useState("");
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("16:9");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleGenerate = async () => {
-    if (!prompt.trim()) return;
-    setIsGenerating(true);
-    setProgress(0);
-    setImageUrl(null);
-    setError(null);
-
-    const interval = setInterval(() => {
-      setProgress((prev) => Math.min(prev + 5, 90));
-    }, 500);
-
-    try {
-      const enhancedPrompt = enhancePrompt(prompt.trim());
-
-      // ✅ CORREGIDO: Usar HuggingFace (server-side) en lugar de Pollinations.ai
-      // Pollinations.ai devuelve 402 Payment Required — ya no es gratuito.
-      // La ruta /next_api/ai/generate-image usa HuggingFace SDXL desde el servidor.
-      const response = await fetch("/next_api/ai/generate-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: enhancedPrompt }),
-        signal: AbortSignal.timeout(60000), // 60s para generación de imagen
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `Error ${response.status} al generar imagen`);
-      }
-
-      const data = await response.json();
-      if (!data.success || !data.imageUrl) {
-        throw new Error(data.error || "No se recibió imagen del servidor");
-      }
-
-      clearInterval(interval);
-      setProgress(100);
-
-      setImageUrl(data.imageUrl);
-      onImageGenerated({
-        id: `img-${Date.now()}`,
-        prompt: prompt.trim(),
-        imageUrl: data.imageUrl,
-        aspectRatio,
-        timestamp: Date.now(),
-      });
-    } catch (error: any) {
-      clearInterval(interval);
-      setError(error.message || "Error al generar imagen. Intenta con otra descripción.");
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleReset = () => {
-    setImageUrl(null);
-    setError(null);
-    setPrompt("");
-  };
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <PromptPanel
-        prompt={prompt}
-        setPrompt={setPrompt}
-        aspectRatio={aspectRatio}
-        setAspectRatio={setAspectRatio}
-        isGenerating={isGenerating}
-        onGenerate={handleGenerate}
-        onReset={handleReset}
-        hasResult={!!imageUrl}
-      />
-      <ResultPanel
-        isGenerating={isGenerating}
-        progress={progress}
-        imageUrl={imageUrl}
-        error={error}
-        prompt={prompt}
-      />
-    </div>
-  );
-}
-
-function PromptPanel({
-  prompt,
-  setPrompt,
-  aspectRatio,
-  setAspectRatio,
-  isGenerating,
-  onGenerate,
-  onReset,
-  hasResult,
-}: {
-  prompt: string;
-  setPrompt: (v: string) => void;
-  aspectRatio: AspectRatio;
-  setAspectRatio: (v: AspectRatio) => void;
-  isGenerating: boolean;
-  onGenerate: () => void;
-  onReset: () => void;
-  hasResult: boolean;
-}) {
-  return (
-    <div className="space-y-4">
-      <div className="bg-card rounded-2xl p-5 border border-border shadow-sm space-y-4">
-        <h3 className="font-semibold flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-violet-500" />
-          Describe la imagen que necesitas
-        </h3>
-
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            Descripción del contenido educativo
-          </label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Ej: Niños aprendiendo matemáticas en un salón colorido con pizarrón y materiales didácticos..."
-            rows={4}
-            className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary transition-colors resize-none"
-          />
-          <p className="text-xs text-muted-foreground mt-1">{prompt.length} caracteres</p>
-        </div>
-
-        <div>
-          <label className="text-xs font-medium text-muted-foreground mb-2 block">
-            Proporción de la imagen
-          </label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {aspectRatioOptions.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setAspectRatio(opt.value)}
-                className={`px-3 py-2 rounded-xl text-xs font-medium border transition-all text-left ${
-                  aspectRatio === opt.value
-                    ? "bg-primary/10 border-primary text-primary"
-                    : "bg-muted border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <p className="font-semibold">{opt.label}</p>
-                <p className="opacity-70">{opt.desc}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex gap-3">
-          {hasResult && (
-            <Button variant="outline" onClick={onReset} className="gap-2">
-              <RefreshCw className="w-4 h-4" /> Nueva
-            </Button>
-          )}
-          <Button
-            onClick={onGenerate}
-            disabled={isGenerating || !prompt.trim()}
-            className="flex-1 gap-2 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
-          >
-            {isGenerating ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Generando...</>
-            ) : (
-              <><Wand2 className="w-4 h-4" /> Generar Imagen</>
-            )}
-          </Button>
-        </div>
+      {/* Tabs */}
+      <div className="flex gap-2">
+        <Button variant={tab==="generator"?"default":"outline"} onClick={()=>setTab("generator")} className="gap-2">
+          <Sparkles className="w-4 h-4"/> Generador de Imágenes
+        </Button>
+        <Button variant={tab==="gallery"?"default":"outline"} onClick={()=>setTab("gallery")} className="gap-2">
+          <Images className="w-4 h-4"/> Galería ({gallery.length})
+        </Button>
       </div>
 
-      <SuggestionsPanel onSelect={setPrompt} />
-    </div>
-  );
-}
+      {tab === "generator" ? (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
 
-function SuggestionsPanel({ onSelect }: { onSelect: (v: string) => void }) {
-  return (
-    <div className="bg-card rounded-2xl p-5 border border-border shadow-sm">
-      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-        <ImageIcon className="w-4 h-4 text-blue-500" />
-        Sugerencias de prompts educativos
-      </h4>
-      <div className="space-y-2">
-        {promptSuggestions.map((s) => (
-          <button
-            key={s}
-            onClick={() => onSelect(s)}
-            className="w-full text-left text-xs px-3 py-2 rounded-lg bg-muted hover:bg-primary/10 hover:text-primary transition-colors border border-transparent hover:border-primary/20"
-          >
-            💡 {s}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
+          {/* LEFT: Form */}
+          <div className="space-y-4">
 
-function ResultPanel({
-  isGenerating,
-  progress,
-  imageUrl,
-  error,
-  prompt,
-}: {
-  isGenerating: boolean;
-  progress: number;
-  imageUrl: string | null;
-  error: string | null;
-  prompt: string;
-}) {
-  const handleDownload = async () => {
-    if (!imageUrl) return;
-    try {
-      const response = await fetch(imageUrl);
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `imagen-educativa-${Date.now()}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      window.open(imageUrl, "_blank");
-    }
-  };
-
-  return (
-    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-      <div className="p-4 border-b border-border flex items-center justify-between">
-        <h3 className="font-semibold text-sm flex items-center gap-2">
-          <ImageIcon className="w-4 h-4 text-purple-500" />
-          Imagen Generada
-        </h3>
-        {imageUrl && (
-          <Button size="sm" variant="outline" onClick={handleDownload} className="gap-1.5 text-xs h-7">
-            <Download className="w-3 h-3" /> Descargar
-          </Button>
-        )}
-      </div>
-
-      <div className="aspect-video flex items-center justify-center bg-muted/30 relative">
-        {isGenerating && (
-          <div className="flex flex-col items-center gap-4 p-8 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-violet-100 dark:bg-violet-950 flex items-center justify-center">
-              <Loader2 className="w-8 h-8 text-violet-600 animate-spin" />
-            </div>
-            <div className="w-full max-w-xs">
-              <p className="text-sm font-medium mb-2">Generando imagen con IA...</p>
-              <div className="w-full bg-muted rounded-full h-2">
-                <motion.div
-                  className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-purple-600"
-                  initial={{ width: "0%" }}
-                  animate={{ width: `${progress}%` }}
-                  transition={{ duration: 0.3 }}
-                />
+            {/* Prompt */}
+            <div className="bg-card rounded-2xl border border-border p-5 shadow-sm">
+              <h3 className="font-semibold mb-3 flex items-center gap-2 text-sm">
+                <Wand2 className="w-4 h-4 text-violet-500"/> Describe la imagen que necesitas
+              </h3>
+              <p className="text-xs text-muted-foreground mb-2">Descripción del contenido educativo</p>
+              <textarea
+                className="w-full px-4 py-3 rounded-xl border border-border bg-background text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-500/30 min-h-[100px]"
+                placeholder="Ej: Niños aprendiendo matemáticas en un salón colorido con frutas..."
+                value={userPrompt}
+                onChange={e => { setUserPrompt(e.target.value); setEnhancedPrompt(""); }}
+                maxLength={300}
+              />
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-xs text-muted-foreground">{userPrompt.length}/300 caracteres</span>
+                <Button size="sm" variant="outline" className="gap-1.5 text-xs h-7"
+                  onClick={handleEnhance} disabled={enhancing||!userPrompt.trim()}>
+                  {enhancing ? <Loader2 className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3 text-violet-500"/>}
+                  Mejorar prompt con IA
+                </Button>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">{progress}%</p>
-              <p className="text-xs text-muted-foreground mt-1">Esto puede tardar hasta 45 segundos</p>
+              {enhancedPrompt && (
+                <motion.div initial={{opacity:0,y:4}} animate={{opacity:1,y:0}}
+                  className="mt-3 p-3 bg-violet-50 dark:bg-violet-950/30 rounded-xl border border-violet-200 dark:border-violet-800">
+                  <p className="text-xs font-medium text-violet-700 dark:text-violet-400 mb-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3"/> Prompt mejorado:
+                  </p>
+                  <p className="text-xs text-violet-600 dark:text-violet-300 leading-relaxed">{enhancedPrompt}</p>
+                </motion.div>
+              )}
+            </div>
+
+            {/* NEM Config */}
+            <div className="bg-card rounded-2xl border border-border p-5 shadow-sm space-y-4">
+              <h3 className="font-semibold flex items-center gap-2 text-sm">
+                <GraduationCap className="w-4 h-4 text-violet-500"/> Configuración NEM
+              </h3>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">Nivel educativo</p>
+                <div className="flex flex-wrap gap-2">
+                  {LEVELS.map(l => (
+                    <button key={l} onClick={()=>setLevel(l)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        level===l ? "bg-violet-600 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-violet-100 dark:hover:bg-violet-950/40 hover:text-violet-700"
+                      }`}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">Campo Formativo NEM</p>
+                <div className="flex flex-wrap gap-2">
+                  {NEM_FIELDS.map(f => (
+                    <button key={f} onClick={()=>setNemField(f)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        nemField===f ? "bg-violet-600 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-violet-100 dark:hover:bg-violet-950/40 hover:text-violet-700"
+                      }`}>{f}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Style & Format */}
+            <div className="bg-card rounded-2xl border border-border p-5 shadow-sm space-y-4">
+              <h3 className="font-semibold flex items-center gap-2 text-sm">
+                <Palette className="w-4 h-4 text-violet-500"/> Estilo y Formato
+              </h3>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">Estilo visual</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {STYLES.map(s => (
+                    <button key={s.value} onClick={()=>setStyle(s.value)}
+                      className={`px-3 py-2 rounded-lg text-xs font-medium text-left transition-all ${
+                        style===s.value ? "bg-violet-600 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-violet-100 dark:hover:bg-violet-950/40 hover:text-violet-700"
+                      }`}>{s.label}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">Formato de imagen</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {FORMATS.map(f => (
+                    <button key={f.value} onClick={()=>setFormat(f.value)}
+                      className={`px-3 py-2 rounded-lg text-xs font-medium text-left transition-all ${
+                        format===f.value ? "bg-violet-600 text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-violet-100 dark:hover:bg-violet-950/40 hover:text-violet-700"
+                      }`}>{f.label}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Templates */}
+            <div className="bg-card rounded-2xl border border-border p-5 shadow-sm">
+              <h3 className="font-semibold mb-3 flex items-center gap-2 text-sm">
+                <BookOpen className="w-4 h-4 text-violet-500"/> Sugerencias de prompts educativos
+              </h3>
+              <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+                {TEMPLATES.map((t,i) => (
+                  <button key={i} onClick={()=>{ setUserPrompt(t); setEnhancedPrompt(""); }}
+                    className="w-full text-left text-xs px-3 py-2 rounded-lg hover:bg-violet-50 dark:hover:bg-violet-950/30 text-muted-foreground hover:text-violet-700 dark:hover:text-violet-300 transition-colors">
+                    💡 {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {atLimit && (
+              <div className="flex items-start gap-2 p-4 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5"/>
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Has alcanzado el límite de <strong>{limit} imágenes</strong> del plan <strong>{plan}</strong> este mes.
+                  Actualiza tu suscripción para continuar generando imágenes.
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <Button variant="outline" className="gap-2 shrink-0" disabled={generating}
+                onClick={()=>{ setUserPrompt(""); setEnhancedPrompt(""); setImageUrl(""); setProgress(0); setGenerating(false); setImageLoading(false); }}>
+                Nueva
+              </Button>
+              <Button className="flex-1 h-11 gap-2 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
+                onClick={handleGenerate} disabled={generating||!userPrompt.trim()||atLimit}>
+                {generating
+                  ? <><Loader2 className="w-4 h-4 animate-spin"/> Generando... {progress}%</>
+                  : <><Sparkles className="w-4 h-4"/> Generar Imagen</>
+                }
+              </Button>
             </div>
           </div>
-        )}
 
-        {!isGenerating && !imageUrl && !error && (
-          <div className="flex flex-col items-center gap-3 p-8 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
-              <Wand2 className="w-8 h-8 text-muted-foreground" />
+          {/* RIGHT: Preview */}
+          <div>
+            <div className="bg-card rounded-2xl border border-border p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold flex items-center gap-2 text-sm">
+                  <Eye className="w-4 h-4 text-violet-500"/> Imagen Generada
+                </h3>
+                {imageUrl && !imageLoading && (
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="gap-1.5 text-xs h-8" onClick={handleSave}>
+                      <Save className="w-3.5 h-3.5"/> Guardar
+                    </Button>
+                    <Button size="sm" className="gap-1.5 text-xs h-8 bg-violet-600 hover:bg-violet-700" onClick={()=>handleDownload()}>
+                      <Download className="w-3.5 h-3.5"/> Descargar
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div className="w-full bg-muted/30 rounded-xl overflow-hidden" style={{minHeight:300}}>
+                {generating && !imageUrl ? (
+                  <div className="flex flex-col items-center justify-center gap-4 py-16">
+                    <div className="w-16 h-16 rounded-2xl bg-violet-100 dark:bg-violet-950/50 flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-violet-500 animate-spin"/>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-medium">Generando tu imagen...</p>
+                      <p className="text-xs text-muted-foreground mt-1">Esto puede tardar 10-30 segundos</p>
+                    </div>
+                    <div className="w-56 h-2 bg-muted rounded-full overflow-hidden">
+                      <motion.div className="h-full bg-violet-500 rounded-full" animate={{width:`${progress}%`}} transition={{duration:0.5}}/>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{progress}%</p>
+                  </div>
+                ) : imageUrl ? (
+                  <div className="relative">
+                    {imageLoading && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-muted/60 rounded-xl z-10">
+                        <Loader2 className="w-8 h-8 text-violet-500 animate-spin"/>
+                      </div>
+                    )}
+                    <img src={imageUrl} alt="Imagen educativa generada"
+                      className="w-full rounded-xl object-contain max-h-[450px]"
+                      onLoad={()=>{ setImageLoading(false); setGenerating(false); setProgress(100); toast.success("¡Imagen generada! ✨"); }}
+                      onError={()=>{ setImageLoading(false); setGenerating(false); toast.error("Error cargando imagen. Intenta de nuevo."); setImageUrl(""); setProgress(0); }}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
+                    <Palette className="w-14 h-14 opacity-20"/>
+                    <p className="text-sm text-center max-w-52 leading-relaxed">
+                      Escribe una descripción y presiona <span className="font-medium text-violet-600">"Generar Imagen"</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {imageUrl && !imageLoading && (
+                <div className="mt-3 p-3 bg-muted/40 rounded-xl">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    <span className="font-medium text-foreground">Prompt:</span> {userPrompt}
+                  </p>
+                  {enhancedPrompt && (
+                    <p className="text-xs text-violet-600 dark:text-violet-400 mt-1.5 leading-relaxed">
+                      <span className="font-medium">Mejorado:</span> {enhancedPrompt.slice(0,120)}...
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
-            <p className="text-sm font-medium text-muted-foreground">
-              Escribe una descripción y presiona "Generar Imagen"
-            </p>
-            <p className="text-xs text-muted-foreground">
-              La imagen aparecerá aquí en unos segundos
-            </p>
           </div>
-        )}
+        </div>
+      ) : (
 
-        {!isGenerating && error && (
-          <div className="flex flex-col items-center gap-3 p-8 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-red-100 dark:bg-red-950 flex items-center justify-center">
-              <AlertCircle className="w-8 h-8 text-red-500" />
+        /* GALLERY */
+        <div>
+          {gallery.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
+              <Images className="w-16 h-16 opacity-20 mb-4"/>
+              <p className="font-medium text-foreground">Tu galería está vacía</p>
+              <p className="text-sm mt-1">Genera imágenes y presiona "Guardar" para verlas aquí</p>
+              <Button className="mt-4 gap-2 bg-violet-600 hover:bg-violet-700" onClick={()=>setTab("generator")}>
+                <Sparkles className="w-4 h-4"/> Ir al Generador
+              </Button>
             </div>
-            <p className="text-sm font-medium text-red-600 dark:text-red-400">Error al generar</p>
-            <p className="text-xs text-muted-foreground max-w-xs">{error}</p>
-          </div>
-        )}
-
-        {!isGenerating && imageUrl && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full h-full"
-          >
-            <img
-              src={imageUrl}
-              alt={prompt}
-              className="w-full h-full object-contain"
-            />
-          </motion.div>
-        )}
-      </div>
-
-      {imageUrl && (
-        <div className="p-4 border-t border-border bg-muted/20">
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            <span className="font-medium text-foreground">Prompt: </span>
-            {prompt}
-          </p>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground mb-4">{gallery.length} imágenes guardadas</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {gallery.map(img => (
+                  <motion.div key={img.id} initial={{opacity:0,scale:0.95}} animate={{opacity:1,scale:1}}
+                    className="bg-card rounded-2xl border border-border overflow-hidden group shadow-sm">
+                    <div className="relative aspect-video bg-muted overflow-hidden">
+                      <img src={img.image_url} alt={img.original_prompt}
+                        className="w-full h-full object-cover transition-transform group-hover:scale-105" loading="lazy"/>
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                        <Button size="sm" variant="secondary" className="text-xs gap-1 h-8" onClick={()=>handleDownload(img.image_url)}>
+                          <Download className="w-3 h-3"/> Descargar
+                        </Button>
+                        <Button size="sm" variant="destructive" className="text-xs h-8 w-8 p-0" onClick={()=>handleDelete(img.id)}>
+                          <Trash2 className="w-3 h-3"/>
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="p-3">
+                      <p className="text-xs font-medium line-clamp-2 text-foreground">{img.original_prompt}</p>
+                      <div className="flex items-center justify-between mt-2 gap-2">
+                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full truncate">{img.education_level}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {new Date(img.created_at).toLocaleDateString("es-MX",{day:"2-digit",month:"short"})}
+                        </span>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
-  );
-}
-
-function GalleryPanel({
-  images,
-  onPreview,
-  onClear,
-}: {
-  images: GeneratedImage[];
-  onPreview: (img: GeneratedImage) => void;
-  onClear: () => void;
-}) {
-  if (images.length === 0) {
-    return (
-      <div className="bg-card rounded-2xl p-12 border border-border text-center">
-        <ImageIcon className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-        <p className="font-medium text-foreground mb-1">Galería vacía</p>
-        <p className="text-sm text-muted-foreground">
-          Las imágenes que generes aparecerán aquí durante esta sesión.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{images.length} imagen(es) generada(s)</p>
-        <Button size="sm" variant="outline" onClick={onClear} className="gap-1.5 text-xs h-7 text-red-600 hover:text-red-700">
-          <X className="w-3 h-3" /> Limpiar galería
-        </Button>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {images.map((img, i) => (
-          <GalleryCard key={img.id} image={img} index={i} onPreview={onPreview} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function GalleryCard({
-  image,
-  index,
-  onPreview,
-}: {
-  image: GeneratedImage;
-  index: number;
-  onPreview: (img: GeneratedImage) => void;
-}) {
-  const handleDownload = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      const response = await fetch(image.imageUrl);
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `imagen-educativa-${image.id}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      window.open(image.imageUrl, "_blank");
-    }
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ delay: index * 0.05 }}
-      className="bg-card rounded-2xl overflow-hidden border border-border shadow-sm hover:shadow-md transition-shadow group cursor-pointer"
-      onClick={() => onPreview(image)}
-    >
-      <div className="relative aspect-video overflow-hidden bg-muted">
-        <img
-          src={image.imageUrl}
-          alt={image.prompt}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-        />
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-          <ZoomIn className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
-      </div>
-      <div className="p-3">
-        <p className="text-xs font-medium line-clamp-2 mb-2">{image.prompt}</p>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-            {image.aspectRatio}
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={handleDownload}
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-          >
-            <Download className="w-3 h-3" />
-          </Button>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function ImagePreviewModal({
-  image,
-  onClose,
-}: {
-  image: GeneratedImage;
-  onClose: () => void;
-}) {
-  const handleDownload = async () => {
-    try {
-      const response = await fetch(image.imageUrl);
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `imagen-educativa-${image.id}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      window.open(image.imageUrl, "_blank");
-    }
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-card rounded-2xl overflow-hidden shadow-2xl border border-border max-w-3xl w-full"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <p className="text-sm font-semibold line-clamp-1 flex-1 mr-4">{image.prompt}</p>
-          <div className="flex items-center gap-2 shrink-0">
-            <Button size="sm" variant="outline" onClick={handleDownload} className="gap-1.5 text-xs h-7">
-              <Download className="w-3 h-3" /> Descargar
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onClose} className="h-7 w-7 p-0">
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-        <div className="p-4">
-          <img
-            src={image.imageUrl}
-            alt={image.prompt}
-            className="w-full rounded-xl object-contain max-h-[60vh]"
-          />
-        </div>
-        <div className="px-4 pb-4 flex items-center gap-2">
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
-            Proporción: {image.aspectRatio}
-          </span>
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
-            {new Date(image.timestamp).toLocaleTimeString("es-MX")}
-          </span>
-        </div>
-      </motion.div>
-    </motion.div>
   );
 }
