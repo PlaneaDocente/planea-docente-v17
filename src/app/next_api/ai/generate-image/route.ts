@@ -1,167 +1,78 @@
-﻿// RUTA: src/app/next_api/ai/generate-image/route.ts
-// Genera ilustraciones educativas usando Groq (genera SVG) 
-// Garantiza respuesta en <3 segundos â€” sin timeouts de Vercel
-
-import { NextResponse } from "next/server";
-
+﻿import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 const GROQ_KEY = process.env.GROQ_API_KEY;
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-async function generateSVG(prompt: string): Promise<string> {
-  if (!GROQ_KEY) throw new Error("GROQ_API_KEY no configurada");
-
-  const systemPrompt = `Eres un experto en SVG y diseÃ±o educativo mexicano.
-Genera SOLO cÃ³digo SVG (sin markdown, sin explicaciones) que represente visualmente el prompt.
-El SVG debe ser:
-- viewBox="0 0 800 500"
-- Colorido y atractivo para niÃ±os
-- Con elementos educativos relevantes al tema
-- Incluir texto del tema en espaÃ±ol
-- Fondos degradados con colores vibrantes
-- Formas geomÃ©tricas simples pero atractivas
-- Ãconos educativos (lÃ¡pices, libros, estrellas, etc.)
-- SOLO SVG vÃ¡lido, empezando con <svg y terminando con </svg>`;
-
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${GROQ_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "llama-3.1-8b-instant",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user",   content: `Crea una ilustraciÃ³n SVG educativa sobre: ${prompt}` },
-      ],
-      max_tokens: 2000,
-      temperature: 0.7,
-    }),
-  });
-
-  if (!res.ok) throw new Error(`Groq error: ${res.status}`);
-
-  const data = await res.json();
-  let svg = data.choices?.[0]?.message?.content || "";
-
-  // Limpiar: extraer solo el SVG
-  const start = svg.indexOf("<svg");
-  const end   = svg.lastIndexOf("</svg>") + 6;
-  if (start >= 0 && end > start) {
-    svg = svg.slice(start, end);
-  } else {
-    // Fallback SVG si Groq no genera correctamente
-    svg = generateFallbackSVG(prompt);
-  }
-
-  // Convertir SVG a data URL
-  const b64 = Buffer.from(svg, "utf-8").toString("base64");
-  return `data:image/svg+xml;base64,${b64}`;
+function getTheme(p: string) {
+  const s = p.toLowerCase();
+  if (/matem|numer|suma|resta|fraccion|geometr/.test(s)) return { bg1:"#1e40af",bg2:"#3b82f6",icon:"MATEMATICAS",emoji:"d83d dcd0",items:["2795","2716 fe0f","d83d dcca","d83d dd22"] };
+  if (/ciencia|biolog|quim|natur|experiment|planet/.test(s)) return { bg1:"#065f46",bg2:"#10b981",icon:"CIENCIAS",emoji:"d83d dd2c",items:["2697 fe0f","d83e uddec","d83c df3f","d83d dd2d"] };
+  if (/histor|mexic|revoluc|aztec|maya|cultura/.test(s)) return { bg1:"#78350f",bg2:"#d97706",icon:"HISTORIA",emoji:"d83c dfd7 fe0f",items:["d83d dcdc","d5ba","2694 fe0f","d83d udc51"] };
+  if (/geograf|mapa|mundo|pais|continen/.test(s)) return { bg1:"#1e3a5f",bg2:"#0ea5e9",icon:"GEOGRAFIA",emoji:"d83c udf0e",items:["d83d uddfa fe0f","d83c udfd4 fe0f","d83c udf0a","270c fe0f"] };
+  if (/espanol|leer|escribir|libro|cuento|lenguaj/.test(s)) return { bg1:"#581c87",bg2:"#9333ea",icon:"ESPANOL",emoji:"d83d udcda",items:["270f fe0f","d83d udcd6","d83d udd0a","d83d udcdd"] };
+  return { bg1:"#4c1d95",bg2:"#7c3aed",icon:"EDUCACION",emoji:"d83c udf93",items:["2b50","d83d udcda","270f fe0f","d83c udfe2"] };
 }
 
-function generateFallbackSVG(prompt: string): string {
-  const keywords = prompt.split(" ").slice(0, 4).join(" ");
-  const colors   = ["#6d28d9","#7c3aed","#8b5cf6","#4f46e5"];
-  const colors2  = ["#fbbf24","#f59e0b","#fb923c","#f472b6"];
-
+function makeSVG(prompt: string): string {
+  const t = getTheme(prompt);
+  const title = prompt.length > 45 ? prompt.slice(0,45)+"..." : prompt;
   return `<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:${colors[0]};stop-opacity:1"/>
-      <stop offset="100%" style="stop-color:${colors[3]};stop-opacity:1"/>
-    </linearGradient>
-    <linearGradient id="card" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.95"/>
-      <stop offset="100%" style="stop-color:#f3f4f6;stop-opacity:0.95"/>
-    </linearGradient>
-  </defs>
-  
-  <!-- Fondo -->
-  <rect width="800" height="500" fill="url(#bg)"/>
-  
-  <!-- CÃ­rculos decorativos -->
-  <circle cx="100" cy="100" r="80" fill="${colors2[0]}" opacity="0.3"/>
-  <circle cx="700" cy="400" r="100" fill="${colors2[1]}" opacity="0.3"/>
-  <circle cx="750" cy="80" r="60"  fill="${colors2[2]}" opacity="0.25"/>
-  <circle cx="50"  cy="420" r="70" fill="${colors2[3]}" opacity="0.25"/>
-  
-  <!-- Ãconos educativos -->
-  <!-- LÃ¡piz -->
-  <g transform="translate(60,200) rotate(-30)">
-    <rect x="0" y="0" width="20" height="90" rx="3" fill="#fbbf24"/>
-    <polygon points="0,90 20,90 10,110" fill="#d97706"/>
-    <rect x="0" y="0" width="20" height="15" rx="2" fill="#6b7280"/>
-  </g>
-  
-  <!-- Libro -->
-  <g transform="translate(680,150)">
-    <rect x="0" y="0" width="60" height="75" rx="5" fill="#f472b6" opacity="0.9"/>
-    <rect x="5" y="8" width="50" height="4" rx="2" fill="white" opacity="0.7"/>
-    <rect x="5" y="18" width="40" height="3" rx="2" fill="white" opacity="0.6"/>
-    <rect x="5" y="26" width="45" height="3" rx="2" fill="white" opacity="0.6"/>
-    <rect x="5" y="34" width="35" height="3" rx="2" fill="white" opacity="0.6"/>
-  </g>
-  
-  <!-- Estrellas -->
-  <text x="150" y="80"  font-size="28" fill="${colors2[0]}" opacity="0.8">â­</text>
-  <text x="620" y="60"  font-size="22" fill="${colors2[1]}" opacity="0.8">âœ¨</text>
-  <text x="700" y="260" font-size="24" fill="${colors2[2]}" opacity="0.8">ðŸŽ¨</text>
-  
-  <!-- Tarjeta principal -->
-  <rect x="80" y="120" width="640" height="260" rx="20" fill="url(#card)" opacity="0.95"/>
-  
-  <!-- Logo/Ãcono -->
-  <circle cx="400" cy="210" r="55" fill="${colors[0]}" opacity="0.15"/>
-  <text x="400" y="225" text-anchor="middle" font-size="48">ðŸ“š</text>
-  
-  <!-- Texto principal -->
-  <text x="400" y="305" text-anchor="middle" 
-        font-family="Arial, sans-serif" font-size="22" font-weight="bold" fill="${colors[0]}">
-    ${keywords.length > 40 ? keywords.slice(0,40)+"..." : keywords}
-  </text>
-  
-  <!-- Subtexto -->
-  <text x="400" y="335" text-anchor="middle"
-        font-family="Arial, sans-serif" font-size="14" fill="#6b7280">
-    IlustraciÃ³n Educativa â€” Nueva Escuela Mexicana
-  </text>
-  
-  <!-- LÃ­neas decorativas abajo -->
-  <rect x="160" y="355" width="480" height="2" rx="1" fill="${colors[0]}" opacity="0.2"/>
-  
-  <!-- Puntos decorativos -->
-  <circle cx="350" cy="370" r="5" fill="${colors[0]}" opacity="0.4"/>
-  <circle cx="400" cy="370" r="5" fill="${colors2[0]}" opacity="0.4"/>
-  <circle cx="450" cy="370" r="5" fill="${colors[0]}" opacity="0.4"/>
-  
-  <!-- Marca -->
-  <text x="400" y="465" text-anchor="middle"
-        font-family="Arial, sans-serif" font-size="12" fill="white" opacity="0.8">
-    ðŸŽ“ PlaneaDocente.com â€” Herramientas IA para Maestros
-  </text>
+<defs>
+<linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+<stop offset="0%" stop-color="${t.bg1}"/>
+<stop offset="100%" stop-color="${t.bg2}"/>
+</linearGradient>
+<filter id="sh"><feDropShadow dx="0" dy="6" stdDeviation="10" flood-opacity="0.25"/></filter>
+</defs>
+<rect width="800" height="500" fill="url(#g1)"/>
+<circle cx="720" cy="80" r="130" fill="white" opacity="0.07"/>
+<circle cx="80" cy="420" r="110" fill="white" opacity="0.07"/>
+<circle cx="400" cy="480" r="90" fill="white" opacity="0.05"/>
+<rect x="50" y="80" width="700" height="340" rx="28" fill="white" opacity="0.95" filter="url(#sh)"/>
+<rect x="50" y="80" width="700" height="10" rx="5" fill="${t.bg2}"/>
+<rect x="50" y="410" width="700" height="10" rx="5" fill="${t.bg2}" opacity="0.5"/>
+<circle cx="400" cy="230" r="75" fill="${t.bg1}" opacity="0.1"/>
+<text x="400" y="260" text-anchor="middle" font-size="72" font-family="Segoe UI Emoji,Arial">${t.icon === "HISTORIA" ? "\uD83C\uDFD7" : t.icon === "CIENCIAS" ? "\uD83D\uDD2C" : t.icon === "MATEMATICAS" ? "\uD83D\uDCD0" : t.icon === "GEOGRAFIA" ? "\uD83C\uDF0E" : t.icon === "ESPANOL" ? "\uD83D\uDCDA" : "\uD83C\uDF93"}</text>
+<text x="400" y="335" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="${t.bg1}">${title}</text>
+<rect x="310" y="350" width="180" height="3" rx="2" fill="${t.bg2}" opacity="0.5"/>
+<text x="400" y="378" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="13" fill="#6b7280">Ilustracion Educativa - Nueva Escuela Mexicana</text>
+<circle cx="360" cy="396" r="4" fill="${t.bg2}" opacity="0.6"/>
+<circle cx="400" cy="396" r="4" fill="${t.bg1}" opacity="0.6"/>
+<circle cx="440" cy="396" r="4" fill="${t.bg2}" opacity="0.6"/>
+<rect x="0" y="468" width="800" height="32" fill="${t.bg1}" opacity="0.5"/>
+<text x="400" y="489" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="12" fill="white">PlaneaDocente.com - IA Educativa para Maestros</text>
 </svg>`;
 }
 
 export async function POST(req: Request) {
   try {
     const { prompt } = await req.json();
-    if (!prompt?.trim()) {
-      return NextResponse.json({ error: "El prompt es obligatorio" }, { status: 400 });
+    if (!prompt?.trim()) return NextResponse.json({ error:"Prompt requerido" },{ status:400 });
+    let svg = "";
+    if (GROQ_KEY) {
+      try {
+        const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{
+          method:"POST",
+          headers:{ Authorization:`Bearer ${GROQ_KEY}`,"Content-Type":"application/json" },
+          body: JSON.stringify({ model:"llama-3.1-8b-instant", messages:[
+            { role:"system", content:"Generate ONLY valid SVG code (viewBox 0 0 800 500) for educational content. Colorful, child-friendly, with gradient background and educational icons. Start with <svg end with </svg>. No markdown." },
+            { role:"user", content:`Educational SVG about: ${prompt.trim()}` }
+          ], max_tokens:1800, temperature:0.4 }),
+          signal: AbortSignal.timeout(7000)
+        });
+        if (r.ok) {
+          const d = await r.json();
+          const raw = d.choices?.[0]?.message?.content || "";
+          const s = raw.indexOf("<svg"), e = raw.lastIndexOf("</svg>")+6;
+          if (s>=0 && e>s && (e-s)>600) svg = raw.slice(s,e);
+        }
+      } catch {}
     }
-
-    const imageUrl = await generateSVG(prompt.trim());
-
-    return NextResponse.json({ success: true, imageUrl });
-
-  } catch (error: any) {
-    console.error("[generate-image]", error.message);
-    return NextResponse.json(
-      { success: false, error: error.message || "Error interno" },
-      { status: 500 }
-    );
+    if (!svg) svg = makeSVG(prompt.trim());
+    const b64 = Buffer.from(svg,"utf-8").toString("base64");
+    return NextResponse.json({ success:true, imageUrl:`data:image/svg+xml;base64,${b64}` });
+  } catch(e:any) {
+    return NextResponse.json({ success:false, error:e.message },{ status:500 });
   }
 }
-
