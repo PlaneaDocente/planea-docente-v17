@@ -49,10 +49,20 @@ export async function POST(req: Request) {
   try {
     const { prompt } = await req.json();
     if (!prompt?.trim()) return NextResponse.json({ error:"Prompt requerido" },{ status:400 });
-    let svg = "";
-    if (GROQ_KEY) {
-      try {
-        const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{
+    // Siempre usar makeSVG - Groq genera formas geometricas aleatorias sin valor educativo
+    const svg = makeSVG(prompt.trim());
+    const b64 = Buffer.from(svg,"utf-8").toString("base64");
+    return NextResponse.json({ success:true, imageUrl:`data:image/svg+xml;base64,${b64}` });
+  } catch(e:any) {
+    return NextResponse.json({ success:false, error:e.message },{ status:500 });
+  }
+}
+
+// UNUSED - kept for future use when Groq improves SVG quality
+async function _tryGroq(prompt: string): Promise<string> {
+  if (!GROQ_KEY) return "";
+  try {
+    const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{
           method:"POST",
           headers:{ Authorization:`Bearer ${GROQ_KEY}`,"Content-Type":"application/json" },
           body: JSON.stringify({ model:"llama-3.1-8b-instant", messages:[

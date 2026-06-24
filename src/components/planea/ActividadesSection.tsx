@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -695,12 +695,12 @@ function ModalForm({
           <input
             readOnly={isReadOnly}
             type="text" inputMode="numeric" pattern="[0-9]*"
-            value={String(form.entregadas)}
+            value={form.entregadas === 0 ? "" : String(form.entregadas)}
             onFocus={(e) => e.target.select()}
             onClick={(e) => (e.target as HTMLInputElement).select()}
             onChange={(e) => {
               const v = e.target.value;
-              handleChange("entregadas", v === "" ? 0 : Math.max(0, parseInt(v) || 0));
+              handleChange("entregadas", v === "" ? 0 : (parseInt(v) >= 0 ? parseInt(v) : 0));
             }}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
@@ -711,12 +711,12 @@ function ModalForm({
           <input
             readOnly={isReadOnly}
             type="text" inputMode="numeric" pattern="[0-9]*"
-            value={String(form.total)}
+            value={form.total <= 1 ? "" : String(form.total)}
             onFocus={(e) => e.target.select()}
             onClick={(e) => (e.target as HTMLInputElement).select()}
             onChange={(e) => {
               const v = e.target.value;
-              handleChange("total", v === "" ? 1 : Math.max(1, parseInt(v) || 1));
+              handleChange("total", v === "" ? 0 : parseInt(v) || 0);
             }}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
