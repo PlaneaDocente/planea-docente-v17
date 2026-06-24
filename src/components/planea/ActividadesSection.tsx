@@ -694,10 +694,8 @@ function ModalForm({
           <label className="block text-xs font-medium mb-1">Entregadas</label>
           <input
             readOnly={isReadOnly}
-            type="number"
-            min={0}
-            max={form.total}
-            value={form.entregadas}
+            type="text" inputMode="numeric" pattern="[0-9]*"
+            value={String(form.entregadas)}
             onFocus={(e) => e.target.select()}
             onClick={(e) => (e.target as HTMLInputElement).select()}
             onChange={(e) => {
@@ -712,9 +710,8 @@ function ModalForm({
           <label className="block text-xs font-medium mb-1">Total de alumnos</label>
           <input
             readOnly={isReadOnly}
-            type="number"
-            min={1}
-            value={form.total}
+            type="text" inputMode="numeric" pattern="[0-9]*"
+            value={String(form.total)}
             onFocus={(e) => e.target.select()}
             onClick={(e) => (e.target as HTMLInputElement).select()}
             onChange={(e) => {
