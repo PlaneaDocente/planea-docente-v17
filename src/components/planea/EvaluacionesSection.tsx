@@ -112,7 +112,7 @@ export default function EvaluacionesSection() {
         titulo: ev.titulo,
         tipo: ev.tipo || iaForm.tipo,
         materia: ev.materia || iaForm.materia,
-        grupo,
+        grupo: grupoSeleccionado,
         criterios: ev.criterios || [],
         estado: "borrador",
         descripcion: ev.descripcion || "",
