@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1021,12 +1021,13 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
       email: email.trim(),
       grupo,
       nombre_hijo: nombreHijo.trim(),
-      alumno_id: alumno?.id || null,
+      alumno_id: alumno?.id || "",
       activo: true,
       creado_en: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase.from("padres").insert({ ...nuevo, user_id: userId }).select().maybeSingle();
+    const alumnoIdParaDB = nuevo.alumno_id === "" ? null : nuevo.alumno_id;
+    const { data, error } = await supabase.from("padres").insert({ ...nuevo, alumno_id: alumnoIdParaDB, user_id: userId }).select().maybeSingle();
     if (error) {
       toast.error("Error guardando: " + error.message);
       setSaving(false);
