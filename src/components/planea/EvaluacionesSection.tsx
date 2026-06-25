@@ -51,6 +51,9 @@ export default function EvaluacionesSection() {
   const [userId, setUserId] = useState<string | null>(null);
   const [grupos, setGrupos] = useState<string[]>([]);
   const [grupoSeleccionado, setGrupoSeleccionado] = useState<string>("");
+  const [showIAModal, setShowIAModal] = useState(false);
+  const [iaGenerating, setIaGenerating] = useState(false);
+  const [iaForm, setIaForm] = useState({ materia: '', tema: '', tipo: 'rubrica' });
 
   useEffect(() => {
     const cargar = async () => {
@@ -127,7 +130,7 @@ export default function EvaluacionesSection() {
           .order("created_at", { ascending: false });
         if (evals) {
           // trigger re-render via tipo actual
-          setTipoActual(iaForm.tipo as any);
+          setActiveTab(iaForm.tipo === 'rubrica' ? 'rubricas' : iaForm.tipo === 'cotejo' ? 'cotejo' : 'examenes');
         }
       }
     } catch { toast.error("Error de conexión"); }
