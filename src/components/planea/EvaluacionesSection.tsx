@@ -277,7 +277,7 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
       .from("evaluaciones")
       .select("*")
       .eq("maestro_id", userId)      // 🔁 cambiado
-      .eq("grupo", grupoSeleccionado)
+      .eq("grupo", grupo)
       .eq("tipo", tipo)
       .order("created_at", { ascending: false });
     if (!error && data) setItems(data as Evaluacion[]);
