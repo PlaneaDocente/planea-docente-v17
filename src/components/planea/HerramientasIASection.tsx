@@ -236,7 +236,20 @@ export default function HerramientasIASection() {
                   <p className="text-xs font-medium text-violet-700 dark:text-violet-400 mb-1 flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3"/> Prompt mejorado:
                   </p>
-                  <p className="text-xs text-violet-600 dark:text-violet-300 leading-relaxed">{enhancedPrompt}</p>
+                  <div className="relative">
+                <p
+                  className="text-xs text-violet-600 dark:text-violet-300 leading-relaxed select-text cursor-text"
+                  style={{ userSelect: "text" }}
+                >
+                  {enhancedPrompt}
+                </p>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(enhancedPrompt); toast.success("Prompt copiado ✅"); }}
+                  className="absolute top-0 right-0 text-xs text-violet-500 hover:text-violet-700 bg-white dark:bg-card px-2 py-0.5 rounded border border-violet-200 hover:border-violet-400 transition-all"
+                >
+                  Copiar
+                </button>
+              </div>
                 </motion.div>
               )}
             </div>

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -23,13 +23,13 @@ import {
   type TareaDigital, type Mensaje,
 } from "./planeadocente-store";
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-   PLANEADOCENTE â€“ CONFIGURACIÃ“N COMPLETA V2
-   IntegraciÃ³n: Supabase + localStorage (modo hÃ­brido)
+/* ═══════════════════════════════════════════════════════════════
+   PLANEADOCENTE – CONFIGURACIÓN COMPLETA V2
+   Integración: Supabase + localStorage (modo híbrido)
    NEM: CCT, Zona Escolar, Sector, Turno, Nivel Educativo
-   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+   ═══════════════════════════════════════════════════════════════ */
 
-/* â”€â”€â”€ TIPOS â”€â”€â”€ */
+/* ─── TIPOS ─── */
 
 interface BackupData {
   version: string;
@@ -88,7 +88,7 @@ interface SuscripcionData {
   usos_referido: number;
 }
 
-/* â”€â”€â”€ CONSTANTES â”€â”€â”€ */
+/* ─── CONSTANTES ─── */
 
 const STORAGE_CONFIG = "pd_configuracion_v2";
 
@@ -109,27 +109,27 @@ const BENEFICIOS_PRO = [
   "Mensajes masivos WhatsApp/Email",
   "Soporte prioritario",
   "Sin publicidad",
-  "Respaldo automÃ¡tico en la nube",
+  "Respaldo automático en la nube",
 ];
 
 const NIVELES_NEM = [
-  "Preescolar â€” 1er Grado",
-  "Preescolar â€” 2do Grado",
-  "Preescolar â€” 3er Grado",
-  "Primaria â€” 1er Grado",
-  "Primaria â€” 2do Grado",
-  "Primaria â€” 3er Grado",
-  "Primaria â€” 4to Grado",
-  "Primaria â€” 5to Grado",
-  "Primaria â€” 6to Grado",
-  "Secundaria â€” 1er Grado",
-  "Secundaria â€” 2do Grado",
-  "Secundaria â€” 3er Grado",
+  "Preescolar — 1er Grado",
+  "Preescolar — 2do Grado",
+  "Preescolar — 3er Grado",
+  "Primaria — 1er Grado",
+  "Primaria — 2do Grado",
+  "Primaria — 3er Grado",
+  "Primaria — 4to Grado",
+  "Primaria — 5to Grado",
+  "Primaria — 6to Grado",
+  "Secundaria — 1er Grado",
+  "Secundaria — 2do Grado",
+  "Secundaria — 3er Grado",
 ];
 
 const TURNOS_NEM = ["Matutino", "Vespertino", "Nocturno", "Discontinuo", "Continuo"];
 
-/* â”€â”€â”€ AUTH HOOK â”€â”€â”€ */
+/* ─── AUTH HOOK ─── */
 
 function useAuthUser(): string | null {
   const [userId, setUserId] = useState<string | null>(null);
@@ -145,7 +145,7 @@ function useAuthUser(): string | null {
   return userId;
 }
 
-/* â”€â”€â”€ HELPERS LOCALSTORAGE CONFIG â”€â”€â”€ */
+/* ─── HELPERS LOCALSTORAGE CONFIG ─── */
 
 function getConfig<T>(key: keyof typeof defaultConfig, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -181,12 +181,12 @@ const defaultConfig = {
     ciclo_escolar: "2025-2026",
     logo_url: "",
     estado: "",
-    pais: "MÃ©xico",
+    pais: "México",
     cct: "",
     zona_escolar: "",
     sector: "",
     turno: "Matutino",
-    nivel_educativo: "Primaria â€” 1er Grado",
+    nivel_educativo: "Primaria — 1er Grado",
   } as EscuelaData,
   docente: {
     nombre: "Maestro",
@@ -212,7 +212,7 @@ const defaultConfig = {
   } as SuscripcionData,
 };
 
-/* â”€â”€â”€ HOOK CONFIG REACTIVO â”€â”€â”€ */
+/* ─── HOOK CONFIG REACTIVO ─── */
 
 function useConfigItem<T>(key: keyof typeof defaultConfig): [T, (v: T | ((prev: T) => T)) => void] {
   const [state, setState] = useState<T>(() => getConfig(key, defaultConfig[key] as unknown as T));
@@ -234,7 +234,7 @@ function useConfigItem<T>(key: keyof typeof defaultConfig): [T, (v: T | ((prev: 
   return [state, updater];
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• COMPONENTE PRINCIPAL â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
 
 export default function ConfiguracionSection() {
   const [activeCard, setActiveCard] = useState<string | null>("escuela");
@@ -249,10 +249,10 @@ export default function ConfiguracionSection() {
       >
         <div className="flex items-center gap-3 mb-2">
           <Settings className="w-7 h-7" />
-          <h2 className="text-xl font-bold">ConfiguraciÃ³n del Sistema</h2>
+          <h2 className="text-xl font-bold">Configuración del Sistema</h2>
         </div>
         <p className="text-white/70 text-sm">
-          Personaliza PlaneaDocente: datos de tu escuela NEM, docente, apariencia, cuenta y suscripciÃ³n.
+          Personaliza PlaneaDocente: datos de tu escuela NEM, docente, apariencia, cuenta y suscripción.
         </p>
       </motion.div>
 
@@ -262,7 +262,7 @@ export default function ConfiguracionSection() {
           id="escuela"
           icon={School}
           title="Datos de la Escuela"
-          description="Nombre, CCT, direcciÃ³n, director, ciclo escolar y logo."
+          description="Nombre, CCT, dirección, director, ciclo escolar y logo."
           color="text-blue-600"
           bg="bg-blue-50 dark:bg-blue-950"
           isOpen={activeCard === "escuela"}
@@ -275,7 +275,7 @@ export default function ConfiguracionSection() {
           id="docente"
           icon={User}
           title="Perfil del Docente"
-          description="Tu informaciÃ³n personal y de contacto."
+          description="Tu información personal y de contacto."
           color="text-emerald-600"
           bg="bg-emerald-50 dark:bg-emerald-950"
           isOpen={activeCard === "docente"}
@@ -300,8 +300,8 @@ export default function ConfiguracionSection() {
         <ConfigCard
           id="suscripcion"
           icon={Crown}
-          title="SuscripciÃ³n y Afiliados"
-          description="Tu plan real, beneficios y cÃ³digo de referido."
+          title="Suscripción y Afiliados"
+          description="Tu plan real, beneficios y código de referido."
           color="text-amber-600"
           bg="bg-amber-50 dark:bg-amber-950"
           isOpen={activeCard === "suscripcion"}
@@ -313,8 +313,8 @@ export default function ConfiguracionSection() {
         <ConfigCard
           id="datos"
           icon={Database}
-          title="GestiÃ³n de Datos"
-          description="Respaldo local, sincronizaciÃ³n cloud y limpieza."
+          title="Gestión de Datos"
+          description="Respaldo local, sincronización cloud y limpieza."
           color="text-rose-600"
           bg="bg-rose-50 dark:bg-rose-950"
           isOpen={activeCard === "datos"}
@@ -326,8 +326,8 @@ export default function ConfiguracionSection() {
         <ConfigCard
           id="info"
           icon={Info}
-          title="InformaciÃ³n del Sistema"
-          description="EstadÃ­sticas de almacenamiento local y nube."
+          title="Información del Sistema"
+          description="Estadísticas de almacenamiento local y nube."
           color="text-cyan-600"
           bg="bg-cyan-50 dark:bg-cyan-950"
           isOpen={activeCard === "info"}
@@ -340,7 +340,7 @@ export default function ConfiguracionSection() {
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TARJETA DE CONFIGURACIÃ“N â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ TARJETA DE CONFIGURACIÓN ═════════════════════ */
 
 function ConfigCard({
   id,
@@ -398,7 +398,7 @@ function ConfigCard({
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• ESCUELA (NEM) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ ESCUELA (NEM) ═════════════════════ */
 
 function EscuelaManager() {
   const userId = useAuthUser();
@@ -452,7 +452,7 @@ function EscuelaManager() {
   };
 
   const handleSyncNow = async () => {
-    if (!userId) { toast.error("Inicia sesiÃ³n para sincronizar."); return; }
+    if (!userId) { toast.error("Inicia sesión para sincronizar."); return; }
     setSyncing(true);
     const { error } = await supabase.from("configuracion").upsert(
       { user_id: userId, escuela, actualizado_en: new Date().toISOString() },
@@ -460,13 +460,13 @@ function EscuelaManager() {
     );
     setSyncing(false);
     if (error) toast.error(error.message);
-    else toast.success("SincronizaciÃ³n completada.");
+    else toast.success("Sincronización completada.");
   };
 
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
-        <Loader2 className="w-4 h-4 animate-spin" /> Cargando configuraciÃ³n...
+        <Loader2 className="w-4 h-4 animate-spin" /> Cargando configuración...
       </div>
     );
   }
@@ -496,17 +496,17 @@ function EscuelaManager() {
             <InfoRow icon={MapPin} label="Sector" value={escuela.sector} />
             <InfoRow icon={DoorOpen} label="Turno" value={escuela.turno} />
             <InfoRow icon={BookOpenCheck} label="Nivel NEM" value={escuela.nivel_educativo} />
-            <InfoRow icon={MapPin} label="DirecciÃ³n" value={escuela.direccion} />
-            <InfoRow icon={Phone} label="TelÃ©fono" value={escuela.telefono} />
+            <InfoRow icon={MapPin} label="Dirección" value={escuela.direccion} />
+            <InfoRow icon={Phone} label="Teléfono" value={escuela.telefono} />
             <InfoRow icon={Mail} label="Email" value={escuela.email} />
             <InfoRow icon={User} label="Director" value={escuela.director} />
             <InfoRow icon={MapPin} label="Estado" value={escuela.estado} />
-            <InfoRow icon={MapPin} label="PaÃ­s" value={escuela.pais} />
+            <InfoRow icon={MapPin} label="País" value={escuela.pais} />
           </div>
 
           <div className="flex gap-2">
             <Button size="sm" variant="outline" className="gap-2" onClick={() => { setForm(escuela); setEditando(true); }}>
-              <Settings className="w-3.5 h-3.5" /> Editar informaciÃ³n
+              <Settings className="w-3.5 h-3.5" /> Editar información
             </Button>
             <Button size="sm" variant="secondary" className="gap-2" onClick={handleSyncNow} disabled={syncing}>
               {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Cloud className="w-3.5 h-3.5" />}
@@ -559,12 +559,12 @@ function EscuelaManager() {
             <input value={form.director} onChange={(e) => setForm({ ...form, director: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">DirecciÃ³n completa</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Dirección completa</label>
             <input value={form.direccion} onChange={(e) => setForm({ ...form, direccion: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">TelÃ©fono</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Teléfono</label>
               <input value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
             </div>
             <div>
@@ -578,7 +578,7 @@ function EscuelaManager() {
               <input value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">PaÃ­s</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">País</label>
               <input value={form.pais} onChange={(e) => setForm({ ...form, pais: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
             </div>
           </div>
@@ -599,7 +599,7 @@ function EscuelaManager() {
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• DOCENTE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ DOCENTE ═════════════════════ */
 
 function DocenteManager() {
   const userId = useAuthUser();
@@ -668,9 +668,9 @@ function DocenteManager() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
             <InfoRow icon={Mail} label="Email" value={docente.email} />
-            <InfoRow icon={Phone} label="TelÃ©fono" value={docente.telefono} />
+            <InfoRow icon={Phone} label="Teléfono" value={docente.telefono} />
             <InfoRow icon={GraduationCap} label="Especialidad" value={docente.especialidad} />
-            <InfoRow icon={Shield} label="CÃ©dula" value={docente.cedula} />
+            <InfoRow icon={Shield} label="Cédula" value={docente.cedula} />
           </div>
 
           <Button size="sm" variant="outline" className="gap-2" onClick={() => { setForm(docente); setEditando(true); }}>
@@ -689,7 +689,7 @@ function DocenteManager() {
               <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">TelÃ©fono</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Teléfono</label>
               <input value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
             </div>
           </div>
@@ -699,7 +699,7 @@ function DocenteManager() {
               <input value={form.especialidad} onChange={(e) => setForm({ ...form, especialidad: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">CÃ©dula profesional</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Cédula profesional</label>
               <input value={form.cedula} onChange={(e) => setForm({ ...form, cedula: e.target.value })} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary" />
             </div>
           </div>
@@ -720,7 +720,7 @@ function DocenteManager() {
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• APARIENCIA â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ APARIENCIA ═════════════════════ */
 
 function AparienciaManager() {
   const userId = useAuthUser();
@@ -823,7 +823,7 @@ function AparienciaManager() {
         <label className="text-xs font-medium text-muted-foreground mb-2 block">Forma de bordes</label>
         <div className="grid grid-cols-3 gap-2">
           {[
-            { id: "small" as const, label: "PequeÃ±o", demo: "rounded-lg" },
+            { id: "small" as const, label: "Pequeño", demo: "rounded-lg" },
             { id: "medium" as const, label: "Medio", demo: "rounded-xl" },
             { id: "large" as const, label: "Grande", demo: "rounded-2xl" },
           ].map((r) => {
@@ -846,7 +846,7 @@ function AparienciaManager() {
 
       {/* Escala de fuente */}
       <div>
-        <label className="text-xs font-medium text-muted-foreground mb-2 block">TamaÃ±o de texto</label>
+        <label className="text-xs font-medium text-muted-foreground mb-2 block">Tamaño de texto</label>
         <div className="grid grid-cols-3 gap-2">
           {[
             { id: "compact" as const, label: "Compacto", size: "text-xs" },
@@ -896,7 +896,7 @@ function AparienciaManager() {
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• SUSCRIPCIÃ“N REAL (SUPABASE) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ SUSCRIPCIÓN REAL (SUPABASE) ═════════════════════ */
 
 function SuscripcionManager() {
   const userId = useAuthUser();
@@ -928,7 +928,7 @@ function SuscripcionManager() {
     return () => { cancelled = true; };
   }, [userId]);
 
-  // Generar cÃ³digo de referido si no existe (local)
+  // Generar código de referido si no existe (local)
   useEffect(() => {
     if (!suscripcionLocal.codigo_referido) {
       const codigo = "PD" + Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -939,7 +939,7 @@ function SuscripcionManager() {
   const copiarCodigo = () => {
     navigator.clipboard.writeText(suscripcionLocal.codigo_referido).then(() => {
       setCopiado(true);
-      toast.success("CÃ³digo copiado al portapapeles");
+      toast.success("Código copiado al portapapeles");
       setTimeout(() => setCopiado(false), 2000);
     });
   };
@@ -961,7 +961,7 @@ function SuscripcionManager() {
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
-        <Loader2 className="w-4 h-4 animate-spin" /> Consultando suscripciÃ³n...
+        <Loader2 className="w-4 h-4 animate-spin" /> Consultando suscripción...
       </div>
     );
   }
@@ -980,7 +980,7 @@ function SuscripcionManager() {
         <p className="text-2xl font-bold">{planActual.precio}</p>
         {expira && (
           <p className="text-xs text-muted-foreground mt-1">
-            {suscripcionReal?.status === "trialing" ? "Trial hasta: " : "PrÃ³xima renovaciÃ³n: "} {expira}
+            {suscripcionReal?.status === "trialing" ? "Trial hasta: " : "Próxima renovación: "} {expira}
           </p>
         )}
         {suscripcionReal?.stripe_subscription_id && (
@@ -1044,7 +1044,7 @@ function SuscripcionManager() {
           <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-300">Programa de Afiliados</h4>
         </div>
         <p className="text-xs text-blue-600 dark:text-blue-400 mb-3">
-          Comparte tu cÃ³digo y gana 30 dÃ­as gratis por cada docente que se registre.
+          Comparte tu código y gana 30 días gratis por cada docente que se registre.
         </p>
 
         <div className="flex items-center gap-2">
@@ -1053,7 +1053,7 @@ function SuscripcionManager() {
             <button
               onClick={copiarCodigo}
               className="p-1.5 rounded-md hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
-              title="Copiar cÃ³digo"
+              title="Copiar código"
             >
               {copiado ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-blue-600" />}
             </button>
@@ -1064,14 +1064,14 @@ function SuscripcionManager() {
         </div>
 
         <p className="text-[10px] text-blue-500 dark:text-blue-400 mt-2">
-          Usos exitosos: <span className="font-bold">{suscripcionLocal.usos_referido}</span> Â· Recompensa acumulada: {suscripcionLocal.usos_referido * 30} dÃ­as
+          Usos exitosos: <span className="font-bold">{suscripcionLocal.usos_referido}</span> · Recompensa acumulada: {suscripcionLocal.usos_referido * 30} días
         </p>
       </div>
     </div>
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• GESTIÃ“N DE DATOS (HÃBRIDA) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ GESTIÓN DE DATOS (HÍBRIDA) ═════════════════════ */
 
 function DatosManager() {
   const userId = useAuthUser();
@@ -1100,7 +1100,7 @@ function DatosManager() {
   };
 
   const sincronizarNube = async () => {
-    if (!userId) { toast.error("Inicia sesiÃ³n para sincronizar."); return; }
+    if (!userId) { toast.error("Inicia sesión para sincronizar."); return; }
     setSyncing(true);
     try {
       const data: BackupData = {
@@ -1135,7 +1135,7 @@ function DatosManager() {
           <div className="flex-1">
             <h4 className="text-sm font-semibold text-red-700 dark:text-red-300">Zona de Peligro</h4>
             <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-              Eliminar todos los datos locales es irreversible. Se perderÃ¡n alumnos, tutores, padres, asistencias, justificaciones, observaciones, avisos, tareas y mensajes.
+              Eliminar todos los datos locales es irreversible. Se perderán alumnos, tutores, padres, asistencias, justificaciones, observaciones, avisos, tareas y mensajes.
             </p>
             {confirmando === "todo" ? (
               <div className="mt-3 flex gap-2">
@@ -1144,7 +1144,7 @@ function DatosManager() {
                 </Button>
                 <Button variant="destructive" size="sm" className="text-xs gap-1" onClick={limpiarTodo} disabled={limpiando}>
                   {limpiando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                  {limpiando ? "Eliminando..." : "SÃ­, eliminar todo"}
+                  {limpiando ? "Eliminando..." : "Sí, eliminar todo"}
                 </Button>
               </div>
             ) : (
@@ -1157,7 +1157,7 @@ function DatosManager() {
       </div>
 
       <div>
-        <h4 className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Limpiar por secciÃ³n</h4>
+        <h4 className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Limpiar por sección</h4>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           <LimpiarBoton label="Alumnos" onClick={() => limpiarTabla("Alumnos", () => store.alumnos.set([]))} />
           <LimpiarBoton label="Tutores" onClick={() => limpiarTabla("Tutores", () => store.tutores.set([]))} />
@@ -1172,13 +1172,13 @@ function DatosManager() {
       </div>
 
       <div className="pt-2 border-t border-border">
-        <h4 className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">SincronizaciÃ³n cloud</h4>
+        <h4 className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Sincronización cloud</h4>
         <Button size="sm" variant="secondary" className="gap-2 w-full" onClick={sincronizarNube} disabled={syncing}>
           {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
           {syncing ? "Subiendo respaldo..." : "Subir respaldo a la nube"}
         </Button>
         <p className="text-[10px] text-muted-foreground mt-1">
-          Requiere sesiÃ³n iniciada. El archivo se guarda en Supabase Storage bucket "backups".
+          Requiere sesión iniciada. El archivo se guarda en Supabase Storage bucket "backups".
         </p>
       </div>
 
@@ -1199,7 +1199,7 @@ function LimpiarBoton({ label, onClick }: { label: string; onClick: () => void }
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• RESPALDO UI (REUTILIZABLE) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ RESPALDO UI (REUTILIZABLE) ═════════════════════ */
 
 function RespaldoUI() {
   const [exportando, setExportando] = useState(false);
@@ -1241,7 +1241,7 @@ function RespaldoUI() {
     reader.onload = (e) => {
       try {
         const data: BackupData = JSON.parse(e.target?.result as string);
-        if (!data.version || !data.fecha) throw new Error("Archivo invÃ¡lido");
+        if (!data.version || !data.fecha) throw new Error("Archivo inválido");
         if (data.alumnos) store.alumnos.set(data.alumnos);
         if (data.tutores) store.tutores.set(data.tutores);
         if (data.padres) store.padres.set(data.padres);
@@ -1264,7 +1264,7 @@ function RespaldoUI() {
 
   return (
     <div className="space-y-3 pt-2 border-t border-border">
-      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Respaldo y restauraciÃ³n local</h4>
+      <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Respaldo y restauración local</h4>
       <div className="grid grid-cols-2 gap-3">
         <Button size="sm" variant="outline" className="gap-1 text-xs w-full" onClick={exportarRespaldo} disabled={exportando}>
           {exportando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
@@ -1284,7 +1284,7 @@ function RespaldoUI() {
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• INFORMACIÃ“N DEL SISTEMA (REAL) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ INFORMACIÓN DEL SISTEMA (REAL) ═════════════════════ */
 
 function InfoManager() {
   const userId = useAuthUser();
@@ -1300,7 +1300,7 @@ function InfoManager() {
   const [dbCounts, setDbCounts] = useState<Record<string, number>>({});
   const [loadingCounts, setLoadingCounts] = useState(false);
 
-  const calcularTamano = useMemo(() => {
+  const calcularTamaño = useMemo(() => {
     let total = 0;
     Object.keys(localStorage).forEach((k) => {
       if (k.startsWith("pd_") || k.startsWith("planeadocente_") || k === STORAGE_CONFIG) {
@@ -1368,30 +1368,30 @@ function InfoManager() {
         </div>
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Espacio utilizado en localStorage</span>
-          <Badge variant="secondary" className="text-xs">{calcularTamano} KB</Badge>
+          <Badge variant="secondary" className="text-xs">{calcularTamaño} KB</Badge>
         </div>
         <div className="mt-2 w-full bg-muted rounded-full h-2">
-          <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(parseFloat(calcularTamano) / 50 * 100, 100)}%` }} />
+          <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(parseFloat(calcularTamaño) / 50 * 100, 100)}%` }} />
         </div>
-        <p className="text-[10px] text-muted-foreground mt-1">LÃ­mite recomendado: ~5 MB por dominio</p>
+        <p className="text-[10px] text-muted-foreground mt-1">Límite recomendado: ~5 MB por dominio</p>
       </div>
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Shield className="w-3 h-3" />
-        <span>VersiÃ³n del store: v2.0 Â· Datos persistentes en este navegador y Supabase</span>
+        <span>Versión del store: v2.0 · Datos persistentes en este navegador y Supabase</span>
       </div>
     </div>
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• UTILIDADES â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ═════════════════════ UTILIDADES ═════════════════════ */
 
 function InfoRow({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
   return (
     <div className="flex items-center gap-2 text-sm py-1">
       <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <span className="text-muted-foreground text-xs">{label}:</span>
-      <span className="font-medium text-xs truncate">{value || "â€”"}</span>
+      <span className="font-medium text-xs truncate">{value || "—"}</span>
     </div>
   );
 }

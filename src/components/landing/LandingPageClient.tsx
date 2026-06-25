@@ -1,4 +1,4 @@
-
+﻿
 "use client";
 
 import { useState, useEffect } from "react";
@@ -157,7 +157,7 @@ function HeroSection({ onRegister, onLogin }: { onRegister: () => void; onLogin:
               size="lg"
               variant="outline"
               onClick={onLogin}
-              className="border-white/40 text-white hover:bg-white/10 text-lg px-8 gap-2"
+              className="border-white text-white hover:bg-white/20 hover:text-white bg-white/10 text-lg px-8 gap-2"
             >
               <Play className="w-5 h-5" /> Ver Demo
             </Button>
