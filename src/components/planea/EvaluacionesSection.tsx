@@ -97,9 +97,9 @@ export default function EvaluacionesSection() {
         body: JSON.stringify({
           tipo: iaForm.tipo,
           materia: iaForm.materia,
-          grado: grupo,
+          grado: grupoSeleccionado,
           tema: iaForm.tema,
-          grupo,
+          grupo: grupoSeleccionado,
         }),
       });
       const data = await res.json();
@@ -112,7 +112,7 @@ export default function EvaluacionesSection() {
         titulo: ev.titulo,
         tipo: ev.tipo || iaForm.tipo,
         materia: ev.materia || iaForm.materia,
-        grupo,
+        grupo: grupoSeleccionado,
         criterios: ev.criterios || [],
         estado: "borrador",
         descripcion: ev.descripcion || "",
@@ -126,7 +126,7 @@ export default function EvaluacionesSection() {
         // Recargar evaluaciones
         const { data: evals } = await supabase
           .from("evaluaciones").select("*")
-          .eq("maestro_id", user.id).eq("grupo", grupo)
+          .eq("maestro_id", user.id).eq("grupo", grupoSeleccionado)
           .order("created_at", { ascending: false });
         if (evals) {
           // trigger re-render via tipo actual
