@@ -97,9 +97,9 @@ export default function EvaluacionesSection() {
         body: JSON.stringify({
           tipo: iaForm.tipo,
           materia: iaForm.materia,
-          grado: grupo,
+          grado: grupoSeleccionado,
           tema: iaForm.tema,
-          grupo,
+          grupo: grupoSeleccionado,
         }),
       });
       const data = await res.json();
