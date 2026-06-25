@@ -126,7 +126,7 @@ export default function EvaluacionesSection() {
         // Recargar evaluaciones
         const { data: evals } = await supabase
           .from("evaluaciones").select("*")
-          .eq("maestro_id", user.id).eq("grupo", grupo)
+          .eq("maestro_id", user.id).eq("grupo", grupoSeleccionado)
           .order("created_at", { ascending: false });
         if (evals) {
           // trigger re-render via tipo actual
@@ -277,7 +277,7 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
       .from("evaluaciones")
       .select("*")
       .eq("maestro_id", userId)      // 🔁 cambiado
-      .eq("grupo", grupo)
+      .eq("grupo", grupoSeleccionado)
       .eq("tipo", tipo)
       .order("created_at", { ascending: false });
     if (!error && data) setItems(data as Evaluacion[]);
@@ -411,7 +411,7 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
         .from("alumnos")
         .select("id, nombre, apellidos, grupo, activo")
         .eq("user_id", userId)
-        .eq("grupo", grupo)
+        .eq("grupo", grupoSeleccionado)
         .eq("activo", true);
       setAlumnos((alums as AlumnoMini[]) || []);
 
@@ -420,7 +420,7 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
         .from("evaluaciones")
         .select("*")
         .eq("maestro_id", userId)      // 🔁 cambiado
-        .eq("grupo", grupo)
+        .eq("grupo", grupoSeleccionado)
         .eq("estado", "publicado");
       const evalsData = (evals as Evaluacion[]) || [];
       setEvaluaciones(evalsData);
