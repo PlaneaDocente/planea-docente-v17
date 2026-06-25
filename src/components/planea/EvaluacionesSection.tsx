@@ -51,9 +51,6 @@ export default function EvaluacionesSection() {
   const [userId, setUserId] = useState<string | null>(null);
   const [grupos, setGrupos] = useState<string[]>([]);
   const [grupoSeleccionado, setGrupoSeleccionado] = useState<string>("");
-  const [showIAModal, setShowIAModal] = useState(false);
-  const [iaGenerating, setIaGenerating] = useState(false);
-  const [iaForm, setIaForm] = useState({ materia: "", tema: "", tipo: "rubrica" });
 
   useEffect(() => {
     const cargar = async () => {
@@ -97,9 +94,9 @@ export default function EvaluacionesSection() {
         body: JSON.stringify({
           tipo: iaForm.tipo,
           materia: iaForm.materia,
-          grado: grupoSeleccionado,
+          grado: grupo,
           tema: iaForm.tema,
-          grupo: grupoSeleccionado,
+          grupo,
         }),
       });
       const data = await res.json();
@@ -112,7 +109,7 @@ export default function EvaluacionesSection() {
         titulo: ev.titulo,
         tipo: ev.tipo || iaForm.tipo,
         materia: ev.materia || iaForm.materia,
-        grupo: grupoSeleccionado,
+        grupo,
         criterios: ev.criterios || [],
         estado: "borrador",
         descripcion: ev.descripcion || "",
@@ -126,11 +123,11 @@ export default function EvaluacionesSection() {
         // Recargar evaluaciones
         const { data: evals } = await supabase
           .from("evaluaciones").select("*")
-          .eq("maestro_id", user.id).eq("grupo", grupoSeleccionado)
+          .eq("maestro_id", user.id).eq("grupo", grupo)
           .order("created_at", { ascending: false });
         if (evals) {
           // trigger re-render via tipo actual
-          setActiveTab(iaForm.tipo === "rubrica" ? "rubricas" : iaForm.tipo === "cotejo" ? "cotejo" : "examenes");
+          setTipoActual(iaForm.tipo as any);
         }
       }
     } catch { toast.error("Error de conexión"); }
@@ -411,7 +408,7 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
         .from("alumnos")
         .select("id, nombre, apellidos, grupo, activo")
         .eq("user_id", userId)
-        .eq("grupo", grupoSeleccionado)
+        .eq("grupo", grupo)
         .eq("activo", true);
       setAlumnos((alums as AlumnoMini[]) || []);
 
@@ -420,7 +417,7 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
         .from("evaluaciones")
         .select("*")
         .eq("maestro_id", userId)      // 🔁 cambiado
-        .eq("grupo", grupoSeleccionado)
+        .eq("grupo", grupo)
         .eq("estado", "publicado");
       const evalsData = (evals as Evaluacion[]) || [];
       setEvaluaciones(evalsData);
