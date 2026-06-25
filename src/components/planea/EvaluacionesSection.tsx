@@ -81,6 +81,59 @@ export default function EvaluacionesSection() {
     { id: "calificaciones" as const, label: "📊 Calificaciones" },
   ] as const;
 
+  const handleGenerarIA = async () => {
+    if (!iaForm.tema.trim()) { toast.error("Escribe el tema de la evaluación"); return; }
+    setIaGenerating(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { toast.error("Inicia sesión primero"); setIaGenerating(false); return; }
+
+      const res = await fetch("/next_api/ai/generate-evaluation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tipo: iaForm.tipo,
+          materia: iaForm.materia,
+          grado: grupo,
+          tema: iaForm.tema,
+          grupo,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) { toast.error(data.error || "Error generando"); setIaGenerating(false); return; }
+
+      const ev = data.evaluacion;
+      const { error } = await supabase.from("evaluaciones").insert({
+        maestro_id: user.id,
+        user_id: user.id,
+        titulo: ev.titulo,
+        tipo: ev.tipo || iaForm.tipo,
+        materia: ev.materia || iaForm.materia,
+        grupo,
+        criterios: ev.criterios || [],
+        estado: "borrador",
+        descripcion: ev.descripcion || "",
+      });
+
+      if (error) { toast.error("Error guardando: " + error.message); }
+      else {
+        toast.success("¡Evaluación generada con IA y guardada! ✨");
+        setShowIAModal(false);
+        setIaForm({ materia: "", tema: "", tipo: "rubrica" });
+        // Recargar evaluaciones
+        const { data: evals } = await supabase
+          .from("evaluaciones").select("*")
+          .eq("maestro_id", user.id).eq("grupo", grupo)
+          .order("created_at", { ascending: false });
+        if (evals) {
+          // trigger re-render via tipo actual
+          setTipoActual(iaForm.tipo as any);
+        }
+      }
+    } catch { toast.error("Error de conexión"); }
+    setIaGenerating(false);
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
@@ -99,9 +152,80 @@ export default function EvaluacionesSection() {
             </button>
           ))}
         </div>
-        <Button size="sm" className="gap-2" onClick={() => toast.info("Generador IA de evaluaciones — próximamente")}>
-          <Brain className="w-4 h-4" /> Generar con IA
+        <Button size="sm" className="gap-2 bg-violet-600 hover:bg-violet-700" onClick={() => setShowIAModal(true)}>
+          <Sparkles className="w-4 h-4" /> Generar con IA
         </Button>
+
+        {/* Modal IA */}
+        {showIAModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-card rounded-2xl shadow-xl w-full max-w-md p-6 border border-border">
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-violet-500" /> Generar Evaluación con IA
+                </h3>
+                <button onClick={() => setShowIAModal(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Tipo de evaluación</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { value:"rubrica", label:"⭐ Rúbrica" },
+                      { value:"cotejo",  label:"✅ Cotejo" },
+                      { value:"examen",  label:"📝 Examen" },
+                    ].map(t => (
+                      <button key={t.value} onClick={() => setIaForm(f => ({...f, tipo: t.value}))}
+                        className={`py-2 px-3 rounded-lg text-xs font-medium transition-all ${
+                          iaForm.tipo === t.value ? "bg-violet-600 text-white" : "bg-muted text-muted-foreground hover:bg-violet-100"
+                        }`}>{t.label}</button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Materia</label>
+                  <input
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                    placeholder="Ej: Matemáticas, Ciencias Naturales..."
+                    value={iaForm.materia}
+                    onChange={e => setIaForm(f => ({...f, materia: e.target.value}))}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Tema a evaluar *</label>
+                  <input
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+                    placeholder="Ej: Fracciones, Ciclo del agua, La Revolución..."
+                    value={iaForm.tema}
+                    onChange={e => setIaForm(f => ({...f, tema: e.target.value}))}
+                  />
+                </div>
+
+                <p className="text-xs text-muted-foreground bg-violet-50 dark:bg-violet-950/30 rounded-lg px-3 py-2">
+                  ✨ La IA generará criterios de evaluación alineados a la NEM y los guardará en tu sección de evaluaciones.
+                </p>
+
+                <div className="flex gap-3 pt-2">
+                  <Button variant="outline" className="flex-1" onClick={() => setShowIAModal(false)} disabled={iaGenerating}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    className="flex-1 bg-violet-600 hover:bg-violet-700 gap-2"
+                    onClick={handleGenerarIA}
+                    disabled={iaGenerating || !iaForm.tema.trim()}
+                  >
+                    {iaGenerating ? <><Loader2 className="w-4 h-4 animate-spin"/> Generando...</> : <><Sparkles className="w-4 h-4"/> Generar</>}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {grupos.length > 0 && (

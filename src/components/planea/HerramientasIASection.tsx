@@ -78,6 +78,8 @@ export default function HerramientasIASection() {
   const [generating, setGenerating]     = useState(false);
   const [enhancing, setEnhancing]       = useState(false);
   const [progress, setProgress]         = useState(0);
+  const [imageError, setImageError]     = useState(false);
+  const [imgKey, setImgKey]             = useState(0);
   const [gallery, setGallery]           = useState<GalleryImage[]>([]);
   const [monthlyCount, setMonthlyCount] = useState(0);
   const [userId, setUserId]             = useState<string|null>(null);
@@ -121,6 +123,7 @@ export default function HerramientasIASection() {
     if (!userPrompt.trim()) { toast.error("Describe la imagen que necesitas"); return; }
     if (atLimit) { toast.error(`Límite de ${limit} imágenes alcanzado. Actualiza tu plan.`); return; }
     setGenerating(true); setImageUrl(""); setProgress(10);
+    setImageError(false); setImgKey(k => k + 1);
     const iv = setInterval(() => setProgress(p => Math.min(p+5,82)), 600);
     try {
       const res  = await fetch("/next_api/ai/generate-image", {
@@ -377,11 +380,39 @@ export default function HerramientasIASection() {
                         <Loader2 className="w-8 h-8 text-violet-500 animate-spin"/>
                       </div>
                     )}
-                    <img src={imageUrl} alt="Imagen educativa generada"
-                      className="w-full rounded-xl object-contain max-h-[450px]"
-                      onLoad={()=>{ setImageLoading(false); setGenerating(false); setProgress(100); toast.success("¡Imagen generada! ✨"); }}
-                      onError={()=>{ setImageLoading(false); setGenerating(false); toast.error("Error cargando imagen. Intenta de nuevo."); setImageUrl(""); setProgress(0); }}
-                    />
+                    {!imageError ? (
+                      <img
+                        key={imgKey}
+                        src={imageUrl}
+                        alt="Imagen educativa generada"
+                        className="w-full rounded-xl object-contain max-h-[450px]"
+                        onLoad={()=>{ setImageLoading(false); setGenerating(false); setProgress(100); toast.success("¡Imagen generada! ✨"); }}
+                        onError={()=>{
+                          // NO limpiar imageUrl aquí — causa loop infinito
+                          // En cambio mostrar estado de error estático
+                          setImageLoading(false);
+                          setGenerating(false);
+                          setImageError(true);
+                          setProgress(0);
+                          toast.error("No se pudo cargar la imagen. Si usas VPN desactívala e intenta de nuevo.");
+                        }}
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-3 py-12">
+                        <span className="text-4xl">⚠️</span>
+                        <p className="text-sm font-medium text-foreground">Error al cargar imagen</p>
+                        <p className="text-xs text-muted-foreground text-center max-w-56">
+                          Pollinations.ai no respondió. Si usas VPN desactívala.
+                          O intenta con otro prompt.
+                        </p>
+                        <button
+                          onClick={()=>{ setImageError(false); setImageUrl(""); setProgress(0); }}
+                          className="text-xs text-violet-600 hover:underline mt-1"
+                        >
+                          Intentar de nuevo
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
