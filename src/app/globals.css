@@ -170,3 +170,10 @@
     color: hsl(var(--primary));
   }
 }
+
+/* Permitir seleccion de texto para copiar */
+* { user-select: text; -webkit-user-select: text; }
+button, [role="button"], nav { user-select: none; -webkit-user-select: none; }
+
+* { user-select: text; -webkit-user-select: text; }
+button, [role="button"] { user-select: none; -webkit-user-select: none; }
