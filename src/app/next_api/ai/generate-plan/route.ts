@@ -103,7 +103,10 @@ NO generes contenido genérico. Sé específico con el tema: "${tema}".`;
     });
 
     if (!res.ok) {
-      throw new Error(`Error Groq: ${res.status}`);
+      if (res.status === 429) {
+        throw new Error("Límite de IA alcanzado. Espera 1 minuto e intenta de nuevo. (Groq 429)");
+      }
+      throw new Error(`Error generando planeación: ${res.status}`);
     }
 
     const data = await res.json();
