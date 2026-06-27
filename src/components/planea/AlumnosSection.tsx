@@ -67,6 +67,13 @@ const GRUPOS = [
   "6° A", "6° B", "6° C", "6° D",
 ];
 
+function grupoMasComun(lista: Alumno[], fallback: string): string {
+  const counts: Record<string, number> = {};
+  for (const a of lista) { if (a.grupo) counts[a.grupo] = (counts[a.grupo] || 0) + 1; }
+  const top = Object.entries(counts).sort((x, y) => y[1] - x[1])[0];
+  return top ? top[0] : fallback;
+}
+
 const TABS: { id: AlumnoTab; label: string; icon: React.ElementType }[] = [
   { id: "registro", label: "Registro", icon: ClipboardList },
   { id: "historial", label: "Historial", icon: History },
@@ -293,17 +300,18 @@ function RegistroView() {
       </div>
 
       <AnimatePresence>
-        {showModal && <NuevoAlumnoModal onClose={() => { setShowModal(false); loadAlumnos(); }} userId={userId} />}
+        {showModal && <NuevoAlumnoModal onClose={() => { setShowModal(false); loadAlumnos(); }} userId={userId} defaultGrupo={grupoFilter || grupoMasComun(alumnos, GRUPOS[0])} />}
       </AnimatePresence>
     </div>
   );
 }
 
-function NuevoAlumnoModal({ onClose, userId }: { onClose: () => void; userId: string | null }) {
+function NuevoAlumnoModal({ onClose, userId, defaultGrupo }: { onClose: () => void; userId: string | null; defaultGrupo?: string }) {
+  const grupoInicial = defaultGrupo || GRUPOS[0];
   const [nombre, setNombre] = useState("");
   const [apellidos, setApellidos] = useState("");
-  const [grupo, setGrupo] = useState(GRUPOS[0]);
-  const [grado, setGrado] = useState("1°");
+  const [grupo, setGrupo] = useState(grupoInicial);
+  const [grado, setGrado] = useState(grupoInicial.split(" ")[0] || "1°");
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {

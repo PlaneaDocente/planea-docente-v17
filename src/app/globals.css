@@ -163,17 +163,20 @@
   }
 }
 
-/* Selección de texto con color del tema */
-@layer base {
-  ::selection {
-    background: hsl(var(--primary) / 0.85);
-    color: hsl(var(--primary-foreground));
-  }
+/* Selección de texto: color fuerte y visible en cualquier tema */
+::selection {
+  background: #2563eb;
+  color: #ffffff;
+}
+::-moz-selection {
+  background: #2563eb;
+  color: #ffffff;
 }
 
-/* Permitir seleccion de texto para copiar */
+/* Permitir seleccionar texto para copiar (incluso dentro de tarjetas clicables) */
 * { user-select: text; -webkit-user-select: text; }
-button, [role="button"], nav { user-select: none; -webkit-user-select: none; }
-
-* { user-select: text; -webkit-user-select: text; }
-button, [role="button"] { user-select: none; -webkit-user-select: none; }
+button, nav { user-select: none; -webkit-user-select: none; }
+/* El texto de contenido siempre seleccionable */
+p, span, h1, h2, h3, h4, h5, li, td, th, label, a, pre, code, blockquote {
+  user-select: text; -webkit-user-select: text;
+}

@@ -29,20 +29,21 @@ export async function POST(req: Request) {
     const isEnglish = /\b(educational|children|school|illustration|colorful|Mexican|NEM)\b/i.test(prompt);
 
     const finalPrompt = isEnglish ? prompt : [
-      "educational illustration for Mexican school",
-      "child-friendly colorful artwork",
+      "professional educational illustration for Mexican primary school",
       prompt.trim(),
       level ? level + " level" : "",
       nemField && nemField !== "General" ? nemField + " subject" : "",
-      style !== "infantil" ? style : "infantil cartoon style",
-      "Nueva Escuela Mexicana NEM",
-      "diverse Mexican children, inclusive",
-      "no text overlay, no watermark, high quality"
+      style !== "infantil" ? style : "warm hand-drawn children's book illustration style",
+      "Nueva Escuela Mexicana NEM context",
+      "diverse Mexican children, inclusive, expressive friendly faces",
+      "soft natural lighting, clean composition, vibrant harmonious colors",
+      "highly detailed, polished, professional quality, well drawn anatomy",
+      "no text, no watermark, no distorted faces, no extra limbs"
     ].filter(Boolean).join(", ");
 
     const seed = Math.floor(Math.random() * 999999);
     const encoded = encodeURIComponent(finalPrompt);
-    const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&seed=${seed}&model=flux`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${seed}&model=flux`;
 
     return NextResponse.json({ success: true, imageUrl, enhancedPrompt: finalPrompt });
 
