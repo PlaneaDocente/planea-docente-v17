@@ -202,7 +202,9 @@ export async function POST(req: Request) {
 
           if (stripeSubscription) {
             const status = stripeSubscription.status;
-            const currentPeriodEnd = (stripeSubscription as any).current_period_end as number;
+            // En la API nueva (dahlia) current_period_end vive en el item; fallback a la vieja.
+            const currentPeriodEnd = ((stripeSubscription as any).items?.data?.[0]?.current_period_end
+              ?? (stripeSubscription as any).current_period_end) as number;
 
             const { error: updateError } = await supabaseAdmin
               .from("subscriptions")
@@ -242,7 +244,8 @@ export async function POST(req: Request) {
         const subscriptionId = subscription.id;
         const status = subscription.status;
         const cancelAtPeriodEnd = subscription.cancel_at_period_end;
-        const currentPeriodEnd = (subscription as any).current_period_end as number;
+        const currentPeriodEnd = ((subscription as any).items?.data?.[0]?.current_period_end
+          ?? (subscription as any).current_period_end) as number;
 
         // Resolver plan por el price (columnas REALES: stripe_price_id / stripe_price_id_anual)
         let newPlanId: string | null = null;
