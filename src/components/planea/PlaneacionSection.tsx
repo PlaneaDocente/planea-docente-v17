@@ -465,7 +465,7 @@ function AIGeneratorModal({ onClose, userId }: { onClose: () => void; userId: st
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error desconocido");
-      setPlaneacionGenerada(data.planeacion);
+      setPlaneacionGenerada(data.content);
       toast.success("Planeación generada con IA");
     } catch (error: any) {
       toast.error(error.message || "Error al generar. Verifica que el endpoint /next_api/ai/generate-plan exista.");
