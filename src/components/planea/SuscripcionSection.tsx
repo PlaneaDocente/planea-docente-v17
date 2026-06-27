@@ -49,7 +49,8 @@ interface ActiveSubscription {
 
 interface PaymentRecord {
   id: string;
-  fecha: string;
+  fecha?: string;
+  created_at?: string;
   monto_centavos: number;
   moneda: string;
   estado: "succeeded" | "pending" | "failed" | "refunded";
@@ -302,10 +303,14 @@ export default function SuscripcionSection() {
       return;
     }
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       const res = await fetch("/api/stripe/customer-portal", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customerId: activeSub.subscription.stripe_customer_id }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
       const data = await res.json();
       if (data.success && data.url) {
@@ -995,10 +1000,10 @@ function PaymentHistoryTable({ userId }: { userId: string | null }) {
         const headers: HeadersInit = {};
         if (token) headers.Authorization = `Bearer ${token}`;
         
-        const res = await fetch(`/api/payments?user_id=${userId}`, { headers });
+        const res = await fetch(`/api/payment-history?userId=${userId}`, { headers });
         const data = await res.json();
-        if (mounted && data.success && Array.isArray(data.data)) {
-          setPayments(data.data);
+        if (mounted && Array.isArray(data)) {
+          setPayments(data);
         }
       } catch (err) {
         console.error("Error fetching payments:", err);
@@ -1060,10 +1065,10 @@ function PaymentHistoryTable({ userId }: { userId: string | null }) {
                 <tbody>
                   {payments.map((p) => (
                     <tr key={p.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 whitespace-nowrap">{formatDateShort(p.fecha)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{p.created_at || p.fecha ? formatDateShort((p.created_at || p.fecha) as string) : "—"}</td>
                       <td className="px-4 py-3">{p.descripcion}</td>
                       <td className="px-4 py-3 text-muted-foreground">{p.metodo}</td>
-                      <td className="px-4 py-3 text-right font-medium">{formatPrice(p.monto_centavos)} {p.moneda.toUpperCase()}</td>
+                      <td className="px-4 py-3 text-right font-medium">{formatPrice(p.monto_centavos)} {(p.moneda || "mxn").toUpperCase()}</td>
                       <td className="px-4 py-3 text-center">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${statusStyles[p.estado] ?? "bg-gray-100 text-gray-700"}`}>
                           {statusLabels[p.estado] ?? p.estado}

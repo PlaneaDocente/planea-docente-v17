@@ -143,11 +143,12 @@ function HeroSection({ onGetStarted }: { onGetStarted: () => void }) {
 }
 
 function StatsSection() {
+  // Datos verificables del producto (sin métricas de adopción inventadas).
   const stats = [
-    { value: "5,000+", label: "Maestros activos", icon: Users },
-    { value: "150,000+", label: "Planeaciones generadas", icon: BookOpen },
-    { value: "98%", label: "Satisfacción", icon: Star },
-    { value: "30 min", label: "Ahorro diario promedio", icon: Clock },
+    { value: "NEM", label: "Alineado al plan de estudios vigente", icon: BookOpen },
+    { value: "IA", label: "Planeaciones y evaluaciones automáticas", icon: Star },
+    { value: "15 días", label: "Prueba gratuita", icon: Clock },
+    { value: "Web", label: "Desde cualquier dispositivo, sin instalar", icon: Users },
   ];
   return (
     <section className="py-12 bg-muted/30 border-y border-border">
@@ -346,11 +347,9 @@ function PricingSection({ onGetStarted }: { onGetStarted: () => void }) {
 }
 
 function TestimonialsSection() {
-  const testimonials = [
-    { name: "Ana Martínez", role: "Maestra de 3° Primaria, CDMX", text: "PlaneaDocente me ahorra 2 horas diarias. Las planeaciones con IA son increíbles y están perfectamente alineadas con la NEM.", avatar: "AM", stars: 5 },
-    { name: "Carlos Rodríguez", role: "Director, Escuela Primaria Toluca", text: "Implementamos PlaneaDocente en toda la escuela. Los reportes institucionales nos ayudan a tomar mejores decisiones.", avatar: "CR", stars: 5 },
-    { name: "Laura Sánchez", role: "Maestra de 5° Primaria, Guadalajara", text: "La comunicación con padres mejoró muchísimo. Ahora todos están al tanto del progreso de sus hijos.", avatar: "LS", stars: 5 },
-  ];
+  // Testimonios reales pendientes (no se usan reseñas inventadas).
+  const testimonials: { name: string; role: string; text: string; avatar: string; stars: number }[] = [];
+  if (testimonials.length === 0) return null;
 
   return (
     <section className="py-20 bg-muted/20">

@@ -322,7 +322,9 @@ export default function AuthGate({ onAuthenticated }: AuthGateProps) {
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/dashboard`,
+          // Debe ir al handler de callback (igual que login/registro), que hace
+          // el intercambio de código y enruta según la suscripción.
+          redirectTo: `${window.location.origin}/auth/callback`,
         },
       });
 

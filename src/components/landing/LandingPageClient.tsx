@@ -172,10 +172,12 @@ function HeroSection({ onRegister, onLogin }: { onRegister: () => void; onLogin:
 }
 
 function StatsBar() {
+  // Datos verificables del producto (no métricas de adopción inventadas).
+  // Cuando tengas cifras reales de uso/satisfacción, puedes sustituirlas aquí.
   const stats = [
-    { value: "5,000+", label: "Maestros activos" },
-    { value: "150,000+", label: "Planeaciones generadas" },
-    { value: "98%", label: "Satisfacción" },
+    { value: "NEM", label: "Alineado a la Nueva Escuela Mexicana" },
+    { value: "IA", label: "Planeaciones y evaluaciones automáticas" },
+    { value: "Web", label: "Desde cualquier dispositivo, sin instalar" },
     { value: "15 días", label: "Prueba gratuita" },
   ];
   return (
@@ -371,11 +373,11 @@ function PricingSection({ onRegister }: { onRegister: () => void }) {
 }
 
 function TestimonialsSection() {
-  const testimonials = [
-    { name: "Maestra Ana García", school: "Primaria Benito Juárez, CDMX", text: "PlaneaDocente me ahorra 3 horas cada semana. Las planeaciones con IA son increíbles y están perfectamente alineadas con la NEM.", avatar: "AG", rating: 5 },
-    { name: "Maestro Carlos López", school: "Secundaria Técnica, Guadalajara", text: "La comunicación con padres mejoró muchísimo. Ahora todos están al tanto de las actividades y tareas de sus hijos.", avatar: "CL", rating: 5 },
-    { name: "Directora María Soto", school: "Escuela Primaria, Monterrey", text: "Implementamos PlaneaDocente en toda la escuela. El panel de director nos da visibilidad total del desempeño académico.", avatar: "MS", rating: 5 },
-  ];
+  // Testimonios reales pendientes. No se usan testimonios inventados.
+  // Agregar aquí solo reseñas reales con consentimiento del docente.
+  const testimonials: { name: string; school: string; text: string; avatar: string; rating: number }[] = [];
+
+  if (testimonials.length === 0) return null;
 
   return (
     <section className="py-20 bg-muted/30">

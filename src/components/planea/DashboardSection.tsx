@@ -11,7 +11,6 @@ import StatCard from "./StatCard";
 import MiniCalendar from "./MiniCalendar";
 import { useAppStore } from "@/store/app-store";
 import { supabase } from "@/integrations/supabase/client";
-import { mockCalendario } from "@/data/mock-data";
 
 interface DashStats {
   alumnos: number;
@@ -22,10 +21,10 @@ interface DashStats {
   mensajesNuevos: number;
 }
 
-const calendarEvents = mockCalendario.map((event: any) => ({
-  day: new Date(event.fecha).getDate(),
-  title: event.titulo,
-}));
+// TODO(datos reales): no existe aún una tabla de eventos/calendario en producción.
+// Se deja vacío para no mostrar datos falsos. Cuando exista la tabla (p.ej. `recordatorios`
+// o `eventos_calendario`), reemplazar por un fetch real y mapear { day, title }.
+const calendarEvents: { day: number; title: string }[] = [];
 
 export default function DashboardSection() {
   const { setActiveSection, getPlanDisplayName, isPro, isTrial, user } = useAppStore();
