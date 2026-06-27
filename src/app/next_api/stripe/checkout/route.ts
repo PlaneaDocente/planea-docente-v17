@@ -168,7 +168,9 @@ export async function POST(req: NextRequest) {
       metadata: { user_id: userId, plan_id: plan_id || "", billing },
       subscription_data: {
         metadata: { user_id: userId, plan_id: plan_id || "" },
-        trial_period_days: billing === "month" ? 15 : 0,
+        // Solo el plan mensual tiene prueba; Stripe rechaza trial_period_days: 0,
+        // por eso para anual se OMITE la propiedad (no se pone 0).
+        ...(billing === "month" ? { trial_period_days: 15 } : {}),
       },
       allow_promotion_codes: true,
       billing_address_collection: "auto",

@@ -166,8 +166,8 @@
 /* Selección de texto con color del tema */
 @layer base {
   ::selection {
-    background: hsl(var(--primary) / 0.2);
-    color: hsl(var(--primary));
+    background: hsl(var(--primary) / 0.85);
+    color: hsl(var(--primary-foreground));
   }
 }
 
