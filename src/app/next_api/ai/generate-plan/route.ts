@@ -92,11 +92,11 @@ NO generes contenido genérico. Sé específico con el tema: "${tema}".`;
         messages: [
           {
             role: "system",
-            content: "Eres un experto en pedagogía de la Nueva Escuela Mexicana (NEM) de México. Generas planeaciones didácticas profesionales, detalladas y aplicables para maestros de educación básica mexicana. Siempre escribes en español con lenguaje docente profesional.",
+            content: "Eres un experto en pedagogía de la Nueva Escuela Mexicana (NEM) de México. Generas planeaciones didácticas profesionales, detalladas y aplicables para maestros de educación básica mexicana. Siempre escribes en español con lenguaje docente profesional. Desarrollas CADA sección con contenido real y extenso, sin dejar nada vacío ni resumido.",
           },
           { role: "user", content: prompt },
         ],
-        max_tokens: 3000,
+        max_tokens: 8000,
         temperature: 0.7,
       }),
       signal: AbortSignal.timeout(25000),

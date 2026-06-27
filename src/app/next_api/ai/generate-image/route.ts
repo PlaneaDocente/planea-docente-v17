@@ -28,7 +28,19 @@ export async function POST(req: Request) {
 
     const isEnglish = /\b(educational|children|school|illustration|colorful|Mexican|NEM)\b/i.test(prompt);
 
-    const finalPrompt = isEnglish ? prompt : [
+    // Detecta si el maestro quiere una imagen REALISTA / fotográfica (personas reales)
+    const wantsReal = /realista|fotograf|foto\b|fotos\b|realismo|realistic|photo/i.test(prompt)
+      || /realista|real|foto/i.test(style);
+
+    const finalPrompt = isEnglish ? prompt : (wantsReal ? [
+      "ultra realistic photograph, photorealistic, real people",
+      prompt.trim(),
+      level ? level + " level Mexican primary school" : "Mexican primary school",
+      nemField && nemField !== "General" ? nemField + " context" : "",
+      "real Mexican children and teacher, natural skin texture, realistic faces",
+      "DSLR photo, 50mm lens, natural soft lighting, sharp focus, high detail, 8k",
+      "no text, no watermark, no distortion, correct anatomy"
+    ].filter(Boolean).join(", ") : [
       "professional educational illustration for Mexican primary school",
       prompt.trim(),
       level ? level + " level" : "",
@@ -39,7 +51,7 @@ export async function POST(req: Request) {
       "soft natural lighting, clean composition, vibrant harmonious colors",
       "highly detailed, polished, professional quality, well drawn anatomy",
       "no text, no watermark, no distorted faces, no extra limbs"
-    ].filter(Boolean).join(", ");
+    ].filter(Boolean).join(", "));
 
     const seed = Math.floor(Math.random() * 999999);
     const encoded = encodeURIComponent(finalPrompt);

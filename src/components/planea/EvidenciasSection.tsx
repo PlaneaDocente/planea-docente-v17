@@ -240,11 +240,17 @@ function FotosView({ grupo, userId }: { grupo: string; userId: string | null }) 
 
     let subidas = 0;
     for (const file of files) {
-      if (!file.type.startsWith("image/")) continue;
+      const mime = file.type || "";
+      const tipo = mime.startsWith("image/") ? "foto"
+        : mime.startsWith("video/") ? "video"
+        : "documento";
+      // Límite defensivo de 50 MB por archivo
+      if (file.size > 50 * 1024 * 1024) continue;
 
       try {
         const safeGrupo = grupo.replace(/[^a-zA-Z0-9_\-]/g, "_");
-        const path = `${userId}/${safeGrupo}/fotos/${Date.now()}-${file.name}`;
+        const carpeta = tipo === "foto" ? "fotos" : tipo === "video" ? "videos" : "documentos";
+        const path = `${userId}/${safeGrupo}/${carpeta}/${Date.now()}-${file.name}`;
 
         // Subir a Storage
         const { error: upError } = await supabase.storage
@@ -263,7 +269,7 @@ function FotosView({ grupo, userId }: { grupo: string; userId: string | null }) 
           titulo: file.name,
           url: publicUrl,
           storage_path: path,
-          tipo: "foto",
+          tipo,
           grupo,
           size_bytes: file.size,
         });

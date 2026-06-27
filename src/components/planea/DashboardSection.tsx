@@ -69,7 +69,7 @@ export default function DashboardSection() {
         supabase.from("planeaciones").select("*", { count: "exact", head: true })
           .eq("maestro_id", uid).eq("estado", "borrador"),
         supabase.from("actividades").select("*", { count: "exact", head: true })
-          .eq("user_id", uid).eq("estado", "activo"),
+          .eq("user_id", uid),
         supabase.from("evaluaciones").select("*", { count: "exact", head: true })
           .eq("maestro_id", uid).gte("created_at", inicioMes),
         supabase.from("mensajes").select("*", { count: "exact", head: true })

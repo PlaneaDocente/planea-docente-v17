@@ -130,6 +130,13 @@ export default function AsistenciaSection() {
 
 /* ═════════════════════ REGISTRO DIARIO (SUPABASE) ═════════════════════ */
 
+function grupoMasComun(lista: { grupo?: string }[], fallback: string): string {
+  const counts: Record<string, number> = {};
+  for (const a of lista) { if (a.grupo) counts[a.grupo] = (counts[a.grupo] || 0) + 1; }
+  const top = Object.entries(counts).sort((x, y) => y[1] - x[1])[0];
+  return top ? top[0] : fallback;
+}
+
 function RegistroDiarioView() {
   const [alumnos, setAlumnos] = useState<AlumnoMini[]>([]);
   const [asistencias, setAsistencias] = useState<AsistenciaDia[]>([]);
@@ -162,6 +169,13 @@ function RegistroDiarioView() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Si hay alumnos, autoselecciona el grupo más común (en vez de quedarse en 1° A)
+  useEffect(() => {
+    if (alumnos.length > 0) {
+      setGrupo((g) => (g === GRUPOS[0] ? grupoMasComun(alumnos, g) : g));
+    }
+  }, [alumnos]);
 
   const alumnosGrupo = useMemo(() => alumnos.filter((a) => a.grupo === grupo), [alumnos, grupo]);
 
