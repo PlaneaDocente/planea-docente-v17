@@ -70,3 +70,8 @@ temp/
 # Bloquear ejecutables y archivos temporales de Stripe
 stripe.exe
 stripe.exe*
+
+# Pesados / artefactos
+*.7z
+*.zip
+tsconfig.tsbuildinfo
