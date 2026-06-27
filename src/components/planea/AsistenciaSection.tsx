@@ -186,18 +186,21 @@ function RegistroDiarioView() {
   const [registros, setRegistros] = useState<RegistroIndividual[]>([]);
 
   useEffect(() => {
-    if (registroExistente) {
-      setRegistros(registroExistente.registros || []);
-    } else {
-      setRegistros(
-        alumnosGrupo.map((a) => ({
-          alumno_id: a.id,
-          alumno_nombre: a.nombre,
-          estado: "presente" as EstadoAsistencia,
-          nota: "",
-        }))
-      );
-    }
+    const previos = registroExistente?.registros || [];
+    const idsValidos = new Set(alumnosGrupo.map((a) => a.id));
+    // Conserva las marcas previas SOLO de alumnos que siguen en el grupo
+    const base = previos.filter((r) => idsValidos.has(r.alumno_id));
+    const yaIncluidos = new Set(base.map((r) => r.alumno_id));
+    // Agrega los alumnos del grupo que aún no están en el registro
+    const faltantes = alumnosGrupo
+      .filter((a) => !yaIncluidos.has(a.id))
+      .map((a) => ({
+        alumno_id: a.id,
+        alumno_nombre: a.nombre,
+        estado: "presente" as EstadoAsistencia,
+        nota: "",
+      }));
+    setRegistros([...base, ...faltantes]);
   }, [registroExistente, alumnosGrupo]);
 
   const toggleEstado = (alumnoId: string) => {

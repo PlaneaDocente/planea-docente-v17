@@ -91,14 +91,15 @@ Responde SOLO con JSON válido, sin markdown, sin texto extra:
           },
           { role: "user", content: prompt }
         ],
-        max_tokens: 800,
+        max_tokens: 3000,
         temperature: 0.6,
       }),
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(40000),
     });
 
     if (!res.ok) {
-      throw new Error(`Groq error: ${res.status}`);
+      const errBody = await res.text().catch(() => "");
+      throw new Error(`Groq ${res.status}: ${errBody.slice(0, 250)}`);
     }
 
     const data = await res.json();

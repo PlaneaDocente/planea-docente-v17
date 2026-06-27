@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const GROQ_KEY = process.env.GROQ_API_KEY;
 
@@ -96,17 +96,18 @@ NO generes contenido genérico. Sé específico con el tema: "${tema}".`;
           },
           { role: "user", content: prompt },
         ],
-        max_tokens: 8000,
+        max_tokens: 4000,
         temperature: 0.7,
       }),
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(50000),
     });
 
     if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
       if (res.status === 429) {
         throw new Error("Límite de IA alcanzado. Espera 1 minuto e intenta de nuevo. (Groq 429)");
       }
-      throw new Error(`Error generando planeación: ${res.status}`);
+      throw new Error(`Groq ${res.status}: ${errBody.slice(0, 250)}`);
     }
 
     const data = await res.json();
