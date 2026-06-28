@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Brain, CheckSquare, FileText, BarChart3,
   Sparkles, Star, Loader2, Trash2, X, Save,
-  GraduationCap, AlertTriangle
+  GraduationCap, AlertTriangle, Eye, Pencil, Download, Columns3
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +26,34 @@ interface Evaluacion {
   grupo: string | null;
   criterios: string[];
   created_at: string;
+  campo_formativo?: string | null;
+  estructura?: RubricaEstructura | null;
 }
+
+interface RubricaFila {
+  indicador: string;
+  descriptores: string[];   // alineado a niveles (misma longitud)
+}
+
+interface RubricaEstructura {
+  campo_formativo: string;
+  niveles: string[];        // columnas (escala de logro)
+  filas: RubricaFila[];     // indicadores (filas)
+}
+
+const CAMPOS_FORMATIVOS = [
+  "Lenguajes",
+  "Saberes y Pensamiento Científico",
+  "Ética, Naturaleza y Sociedades",
+  "De lo Humano y lo Comunitario",
+];
+
+const NIVELES_DEFAULT = [
+  "Excelente (4)",
+  "Satisfactorio (3)",
+  "Mejorable (2)",
+  "Insuficiente (1)",
+];
 
 interface AlumnoMini {
   id: string;
@@ -251,7 +278,7 @@ export default function EvaluacionesSection() {
         </div>
       )}
 
-      {activeTab === "rubricas" && <EvaluacionesView grupo={grupoSeleccionado} userId={userId} tipo="rubrica" />}
+      {activeTab === "rubricas" && <RubricasView grupo={grupoSeleccionado} userId={userId} />}
       {activeTab === "cotejo" && <EvaluacionesView grupo={grupoSeleccionado} userId={userId} tipo="cotejo" />}
       {activeTab === "examenes" && <EvaluacionesView grupo={grupoSeleccionado} userId={userId} tipo="examen" />}
       {activeTab === "calificaciones" && <CalificacionesView grupo={grupoSeleccionado} userId={userId} />}
@@ -512,6 +539,320 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
           </tbody>
         </table>
       )}
+    </div>
+  );
+}
+
+/* ═════════════════════ RÚBRICAS (constructor de matriz editable) ═════════════════════ */
+
+function RubricasView({ grupo, userId }: { grupo: string; userId: string | null }) {
+  const [items, setItems] = useState<Evaluacion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [editing, setEditing] = useState<Evaluacion | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const cargar = useCallback(async () => {
+    if (!grupo || !userId) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("evaluaciones")
+      .select("*")
+      .eq("maestro_id", userId)
+      .eq("grupo", grupo)
+      .eq("tipo", "rubrica")
+      .order("created_at", { ascending: false });
+    if (!error && data) setItems(data as Evaluacion[]);
+    setLoading(false);
+  }, [grupo, userId]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const eliminar = async (id: string) => {
+    if (!confirm("¿Eliminar esta rúbrica?")) return;
+    await supabase.from("evaluaciones").delete().eq("id", id);
+    if (expandedId === id) setExpandedId(null);
+    cargar();
+  };
+
+  const publicar = async (id: string) => {
+    const { error } = await supabase.from("evaluaciones").update({ estado: "publicado" }).eq("id", id);
+    if (!error) { toast.success("Rúbrica publicada. Ya puedes evaluar en Calificaciones."); cargar(); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-semibold">Rúbricas de Evaluación</h3>
+        <Button size="sm" variant="outline" className="gap-2" onClick={() => { setEditing(null); setBuilderOpen(true); }}>
+          <Plus className="w-4 h-4" /> Nueva rúbrica
+        </Button>
+      </div>
+
+      <AnimatePresence>
+        {builderOpen && (
+          <RubricaBuilder
+            grupo={grupo}
+            userId={userId}
+            editing={editing}
+            onClose={() => setBuilderOpen(false)}
+            onSaved={() => { setBuilderOpen(false); cargar(); }}
+          />
+        )}
+      </AnimatePresence>
+
+      {loading ? (
+        <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+      ) : items.length === 0 ? (
+        <div className="bg-card rounded-2xl p-10 border border-border text-center">
+          <Star className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+          <p className="text-muted-foreground">No hay rúbricas aún. Crea una con el botón "Nueva rúbrica".</p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {items.map((r) => {
+            const est = r.estructura || null;
+            const nFilas = est?.filas?.length ?? (Array.isArray(r.criterios) ? r.criterios.length : 0);
+            const nNiveles = est?.niveles?.length ?? 0;
+            return (
+              <div key={r.id} className="bg-card rounded-xl border border-border overflow-hidden">
+                <div className="p-4 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                    <Star className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium truncate">{r.titulo}</p>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${r.estado === "publicado" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{r.estado}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {r.campo_formativo || r.materia} · {nFilas} indicadores × {nNiveles} niveles
+                    </p>
+                  </div>
+                  {est && (
+                    <button onClick={() => setExpandedId(expandedId === r.id ? null : r.id)} className="p-2 hover:bg-muted rounded-lg text-muted-foreground" title="Ver rúbrica">
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button onClick={() => { setEditing(r); setBuilderOpen(true); }} className="p-2 hover:bg-primary/10 rounded-lg text-muted-foreground hover:text-primary" title="Editar">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  {r.estado !== "publicado" && (
+                    <Button size="sm" variant="ghost" className="text-xs h-7 text-emerald-600" onClick={() => publicar(r.id)}>Publicar</Button>
+                  )}
+                  <button onClick={() => eliminar(r.id)} className="p-2 hover:bg-red-100 rounded-lg text-red-500" title="Eliminar"><Trash2 className="w-4 h-4" /></button>
+                </div>
+                {expandedId === r.id && est && (
+                  <div className="px-4 pb-4 border-t border-border pt-3">
+                    <RubricaMatriz estructura={est} titulo={r.titulo} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RubricaBuilder({ grupo, userId, editing, onClose, onSaved }: {
+  grupo: string; userId: string | null; editing: Evaluacion | null; onClose: () => void; onSaved: () => void;
+}) {
+  const est0 = editing?.estructura || null;
+  const [campoFormativo, setCampoFormativo] = useState(editing?.campo_formativo || est0?.campo_formativo || CAMPOS_FORMATIVOS[0]);
+  const [titulo, setTitulo] = useState(editing?.titulo || "");
+  const [materia, setMateria] = useState(editing?.materia || "Español");
+  const [niveles, setNiveles] = useState<string[]>(est0?.niveles?.length ? est0.niveles : [...NIVELES_DEFAULT]);
+  const [filas, setFilas] = useState<RubricaFila[]>(
+    est0?.filas?.length
+      ? est0.filas.map(f => ({ indicador: f.indicador, descriptores: [...f.descriptores] }))
+      : [{ indicador: "", descriptores: ["", "", "", ""] }]
+  );
+  const [saving, setSaving] = useState(false);
+
+  // Mantener descriptores alineados al número de niveles
+  const ajustarFila = (desc: string[], n: number) => {
+    const copia = [...desc];
+    while (copia.length < n) copia.push("");
+    return copia.slice(0, n);
+  };
+
+  const addNivel = () => {
+    setNiveles(prev => [...prev, ""]);
+    setFilas(prev => prev.map(f => ({ ...f, descriptores: [...f.descriptores, ""] })));
+  };
+  const removeNivel = (idx: number) => {
+    if (niveles.length <= 1) return;
+    setNiveles(prev => prev.filter((_, i) => i !== idx));
+    setFilas(prev => prev.map(f => ({ ...f, descriptores: f.descriptores.filter((_, i) => i !== idx) })));
+  };
+  const setNivel = (idx: number, val: string) => setNiveles(prev => prev.map((n, i) => i === idx ? val : n));
+
+  const addFila = () => setFilas(prev => [...prev, { indicador: "", descriptores: ajustarFila([], niveles.length) }]);
+  const removeFila = (idx: number) => { if (filas.length > 1) setFilas(prev => prev.filter((_, i) => i !== idx)); };
+  const setIndicador = (idx: number, val: string) => setFilas(prev => prev.map((f, i) => i === idx ? { ...f, indicador: val } : f));
+  const setDescriptor = (fi: number, ni: number, val: string) =>
+    setFilas(prev => prev.map((f, i) => i === fi ? { ...f, descriptores: f.descriptores.map((d, j) => j === ni ? val : d) } : f));
+
+  const guardar = async () => {
+    if (!titulo.trim()) { toast.error("Escribe un título para la rúbrica."); return; }
+    if (!userId || !grupo) { toast.error("Falta sesión o grupo."); return; }
+    const nivelesLimpios = niveles.map(n => n.trim()).filter(Boolean);
+    const filasLimpias = filas
+      .map(f => ({ indicador: f.indicador.trim(), descriptores: ajustarFila(f.descriptores, niveles.length).map(d => d.trim()) }))
+      .filter(f => f.indicador);
+    if (nivelesLimpios.length === 0) { toast.error("Agrega al menos un nivel de logro (columna)."); return; }
+    if (filasLimpias.length === 0) { toast.error("Agrega al menos un indicador (fila)."); return; }
+
+    const estructura: RubricaEstructura = { campo_formativo: campoFormativo, niveles: nivelesLimpios, filas: filasLimpias };
+    const payload = {
+      titulo: titulo.trim(),
+      materia,
+      tipo: "rubrica" as const,
+      maestro_id: userId,
+      user_id: userId,
+      grupo,
+      campo_formativo: campoFormativo,
+      criterios: filasLimpias.map(f => f.indicador),
+      estructura,
+    };
+
+    setSaving(true);
+    let error;
+    if (editing) {
+      ({ error } = await supabase.from("evaluaciones").update(payload).eq("id", editing.id));
+    } else {
+      ({ error } = await supabase.from("evaluaciones").insert({ ...payload, estado: "borrador" }));
+    }
+    setSaving(false);
+    if (error) {
+      if (error.code === "42703") toast.error("Faltan columnas en 'evaluaciones'. Corre el SQL del Lote 16 en Supabase.");
+      else toast.error("Error al guardar: " + error.message);
+      return;
+    }
+    toast.success(editing ? "Rúbrica actualizada" : "Rúbrica creada");
+    onSaved();
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+      className="bg-card rounded-2xl p-5 border border-border space-y-4 overflow-hidden">
+      <div className="flex items-center justify-between">
+        <h4 className="font-semibold text-sm flex items-center gap-2"><Star className="w-4 h-4 text-amber-500" /> {editing ? "Editar rúbrica" : "Nueva rúbrica"}</h4>
+        <button onClick={onClose} className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground"><X className="w-4 h-4" /></button>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Campo formativo (NEM)</label>
+          <select value={campoFormativo} onChange={e => setCampoFormativo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+            {CAMPOS_FORMATIVOS.map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Materia (para reportes)</label>
+          <select value={materia} onChange={e => setMateria(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+            <option>Matemáticas</option><option>Español</option><option>Ciencias Naturales</option><option>Historia</option><option>Geografía</option><option>Formación Cívica</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-muted-foreground mb-1 block">Título de la rúbrica</label>
+        <input value={titulo} onChange={e => setTitulo(e.target.value)} placeholder="Ej: Rúbrica para la coevaluación de una exposición oral" className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border" />
+      </div>
+
+      {/* Niveles (columnas) */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1"><Columns3 className="w-3 h-3" /> Niveles de logro (columnas)</label>
+          <Button size="sm" variant="ghost" className="text-xs h-7" onClick={addNivel}>+ Nivel</Button>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {niveles.map((n, i) => (
+            <div key={i} className="flex items-center gap-1 bg-muted rounded-lg px-2 py-1">
+              <input value={n} onChange={e => setNivel(i, e.target.value)} placeholder={`Nivel ${i + 1}`} className="bg-transparent text-xs outline-none w-32" />
+              {niveles.length > 1 && <button onClick={() => removeNivel(i)} className="text-red-400 hover:text-red-600"><X className="w-3 h-3" /></button>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Matriz: indicadores (filas) × niveles (columnas) con descriptores */}
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-xs font-medium text-muted-foreground">Indicadores y descriptores</label>
+          <Button size="sm" variant="ghost" className="text-xs h-7" onClick={addFila}>+ Indicador</Button>
+        </div>
+        <div className="overflow-x-auto border border-border rounded-xl">
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-muted/60">
+                <th className="text-left p-2 border-b border-border min-w-[140px] sticky left-0 bg-muted/60">Indicador / Criterio</th>
+                {niveles.map((n, i) => (
+                  <th key={i} className="text-left p-2 border-b border-l border-border min-w-[160px] font-medium">{n || `Nivel ${i + 1}`}</th>
+                ))}
+                <th className="border-b border-border w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((f, fi) => (
+                <tr key={fi} className="align-top">
+                  <td className="p-1 border-b border-border sticky left-0 bg-card">
+                    <textarea value={f.indicador} onChange={e => setIndicador(fi, e.target.value)} placeholder={`Indicador ${fi + 1}`} rows={3} className="w-full bg-muted rounded-lg px-2 py-1.5 text-xs outline-none border border-border resize-none font-medium" />
+                  </td>
+                  {f.descriptores.map((d, ni) => (
+                    <td key={ni} className="p-1 border-b border-l border-border">
+                      <textarea value={d} onChange={e => setDescriptor(fi, ni, e.target.value)} placeholder="Descripción observable…" rows={3} className="w-full bg-muted rounded-lg px-2 py-1.5 text-xs outline-none border border-border resize-none" />
+                    </td>
+                  ))}
+                  <td className="p-1 border-b border-border text-center">
+                    {filas.length > 1 && <button onClick={() => removeFila(fi)} className="text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Button variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
+        <Button className="flex-1 gap-2" onClick={guardar} disabled={saving || !titulo.trim()}>
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {editing ? "Guardar cambios" : "Guardar rúbrica"}
+        </Button>
+      </div>
+    </motion.div>
+  );
+}
+
+function RubricaMatriz({ estructura, titulo }: { estructura: RubricaEstructura; titulo?: string }) {
+  return (
+    <div className="overflow-x-auto">
+      {estructura.campo_formativo && (
+        <p className="text-xs text-muted-foreground mb-2">Campo formativo: <span className="font-medium text-foreground">{estructura.campo_formativo}</span></p>
+      )}
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr className="bg-muted/60">
+            <th className="text-left p-2 border border-border min-w-[140px]">Indicador / Criterio</th>
+            {estructura.niveles.map((n, i) => (
+              <th key={i} className="text-left p-2 border border-border min-w-[150px] font-semibold">{n}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {estructura.filas.map((f, fi) => (
+            <tr key={fi} className="align-top">
+              <td className="p-2 border border-border font-medium bg-muted/30">{f.indicador}</td>
+              {f.descriptores.map((d, ni) => (
+                <td key={ni} className="p-2 border border-border text-muted-foreground">{d || "—"}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
