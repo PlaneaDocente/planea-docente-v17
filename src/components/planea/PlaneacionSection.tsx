@@ -365,7 +365,36 @@ function BibliotecaActividades() {
       const { data: { session } } = await supabase.auth.getSession();
       const uid = session?.user?.id;
       if (!uid) { toast.error("Inicia sesión para usar la actividad"); return; }
-      const contenido = `**${a.titulo}**\n\nCampo formativo: ${a.materia || "—"}\nGrado sugerido: ${a.grado || "—"}\nDuración: ${a.duracion} min\n\n${a.descripcion || ""}`;
+      const dev = Math.max((a.duracion || 50) - 20, 20);
+      const contenido = `# ${a.titulo}
+
+## Datos generales
+- **Campo formativo:** ${a.materia || "—"}
+- **Grado sugerido:** ${a.grado || "—"}
+- **Duración:** ${a.duracion} minutos
+- **Metodología NEM:** aprendizaje basado en la indagación y el trabajo colaborativo
+
+## Propósito
+${a.descripcion || ""} Se busca que las y los estudiantes construyan aprendizajes significativos mediante la participación activa, la colaboración y la reflexión.
+
+## Ejes articuladores
+Inclusión · Pensamiento crítico · Interculturalidad crítica · Igualdad de género · Vida saludable · Apropiación de las culturas a través de la lectura y la escritura. (Selecciona los que apliquen a tu grupo.)
+
+## Materiales
+- Materiales de uso común en el aula (cuaderno, colores, hojas, pizarrón).
+- Recursos específicos según la actividad.
+
+## Secuencia didáctica
+**Inicio (10 min):** Recupera los saberes previos con preguntas detonadoras y presenta el propósito de la sesión.
+**Desarrollo (${dev} min):** ${a.descripcion || "Las y los estudiantes desarrollan la actividad central"}. Acompaña el trabajo en equipo, observa y orienta.
+**Cierre (10 min):** Socializa los resultados, propicia la reflexión sobre lo aprendido y registra las evidencias.
+
+## Evaluación
+- Observación directa con lista de cotejo o rúbrica.
+- Participación, colaboración y actitud.
+- Producto o evidencia final del aprendizaje.
+
+> Planeación base de la Biblioteca PlaneaDocente. Edítala y ajústala a tu contexto, grupo y contenidos del programa analítico.`;
       const { error } = await supabase.from("planeaciones").insert({
         maestro_id: uid,
         titulo: a.titulo,

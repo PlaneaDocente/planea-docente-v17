@@ -279,8 +279,11 @@ function FotosView({ grupo, userId, alumnoId, alumnoNombre }: { grupo: string; u
       const tipo = mime.startsWith("image/") ? "foto"
         : mime.startsWith("video/") ? "video"
         : "documento";
-      // Límite defensivo de 50 MB por archivo
-      if (file.size > 50 * 1024 * 1024) continue;
+      // Límite de 50 MB por archivo (tope del plan gratuito de Supabase)
+      if (file.size > 50 * 1024 * 1024) {
+        toast.error(`"${file.name}" pesa ${(file.size / 1024 / 1024).toFixed(0)} MB y supera el límite de 50 MB del plan gratuito. Comprímelo o usa uno más ligero.`);
+        continue;
+      }
 
       try {
         const safeGrupo = grupo.replace(/[^a-zA-Z0-9_\-]/g, "_");
@@ -677,6 +680,10 @@ function DocumentosView({ grupo, userId, alumnoId, alumnoNombre }: { grupo: stri
     setIsUploading(true);
     let subidas = 0;
     for (const file of files) {
+      if (file.size > 50 * 1024 * 1024) {
+        toast.error(`"${file.name}" pesa ${(file.size / 1024 / 1024).toFixed(0)} MB y supera el límite de 50 MB del plan gratuito. Comprímelo o usa uno más ligero.`);
+        continue;
+      }
       try {
         const safeGrupo = grupo.replace(/[^a-zA-Z0-9_\-]/g, "_");
         const path = `${userId}/${safeGrupo}/documentos/${Date.now()}-${file.name}`;
@@ -847,6 +854,10 @@ function VideosView({ grupo, userId, alumnoId, alumnoNombre }: { grupo: string; 
     setIsUploading(true);
     let subidas = 0;
     for (const file of files) {
+      if (file.size > 50 * 1024 * 1024) {
+        toast.error(`"${file.name}" pesa ${(file.size / 1024 / 1024).toFixed(0)} MB y supera el límite de 50 MB del plan gratuito de Supabase. Comprime el video o usa uno más corto.`);
+        continue;
+      }
       try {
         const safeGrupo = grupo.replace(/[^a-zA-Z0-9_\-]/g, "_");
         const path = `${userId}/${safeGrupo}/videos/${Date.now()}-${file.name}`;
