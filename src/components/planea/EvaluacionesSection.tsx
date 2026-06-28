@@ -279,7 +279,7 @@ export default function EvaluacionesSection() {
       )}
 
       {activeTab === "rubricas" && <RubricasView grupo={grupoSeleccionado} userId={userId} />}
-      {activeTab === "cotejo" && <EvaluacionesView grupo={grupoSeleccionado} userId={userId} tipo="cotejo" />}
+      {activeTab === "cotejo" && <CotejosView grupo={grupoSeleccionado} userId={userId} />}
       {activeTab === "examenes" && <EvaluacionesView grupo={grupoSeleccionado} userId={userId} tipo="examen" />}
       {activeTab === "calificaciones" && <CalificacionesView grupo={grupoSeleccionado} userId={userId} />}
     </div>
@@ -551,6 +551,7 @@ function RubricasView({ grupo, userId }: { grupo: string; userId: string | null 
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editing, setEditing] = useState<Evaluacion | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [evaluando, setEvaluando] = useState<Evaluacion | null>(null);
 
   const cargar = useCallback(async () => {
     if (!grupo || !userId) return;
@@ -601,6 +602,10 @@ function RubricasView({ grupo, userId }: { grupo: string; userId: string | null 
         )}
       </AnimatePresence>
 
+      {evaluando && (
+        <EvaluarAlumnosModal evaluacion={evaluando} grupo={grupo} userId={userId} onClose={() => setEvaluando(null)} />
+      )}
+
       {loading ? (
         <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
       ) : items.length === 0 ? (
@@ -633,6 +638,11 @@ function RubricasView({ grupo, userId }: { grupo: string; userId: string | null 
                     <button onClick={() => setExpandedId(expandedId === r.id ? null : r.id)} className="p-2 hover:bg-muted rounded-lg text-muted-foreground" title="Ver rúbrica">
                       <Eye className="w-4 h-4" />
                     </button>
+                  )}
+                  {est && (
+                    <Button size="sm" variant="ghost" className="text-xs h-7 text-blue-600 gap-1" onClick={() => setEvaluando(r)} title="Calificar alumnos">
+                      <GraduationCap className="w-3.5 h-3.5" /> Evaluar
+                    </Button>
                   )}
                   <button onClick={() => { setEditing(r); setBuilderOpen(true); }} className="p-2 hover:bg-primary/10 rounded-lg text-muted-foreground hover:text-primary" title="Editar">
                     <Pencil className="w-4 h-4" />
@@ -854,5 +864,435 @@ function RubricaMatriz({ estructura, titulo }: { estructura: RubricaEstructura; 
         </tbody>
       </table>
     </div>
+  );
+}
+
+/* ═════════════════════ EVALUAR ALUMNOS (rúbrica / cotejo) + PDF ═════════════════════ */
+
+function nivelPuntos(label: string): number | null {
+  const m = (label || "").match(/(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[1]) : null;
+}
+
+function calcularResultado(estructura: RubricaEstructura, valoresArr: string[]) {
+  const niveles = estructura.niveles;
+  const puntos = niveles.map(nivelPuntos);
+  const esNumerica = puntos.length > 0 && puntos.every(p => p !== null) && puntos.some(p => (p || 0) > 0);
+  const nFilas = estructura.filas.length;
+  if (esNumerica) {
+    const maxP = Math.max(...puntos.map(p => p || 0));
+    let sum = 0; let sumMax = 0;
+    for (let i = 0; i < nFilas; i++) {
+      sumMax += maxP;
+      const idx = niveles.indexOf(valoresArr[i]);
+      if (idx >= 0 && puntos[idx] != null) sum += puntos[idx] as number;
+    }
+    const nota10 = sumMax > 0 ? (sum / sumMax) * 10 : 0;
+    return { nota10, total: sum, pct: sumMax > 0 ? (sum / sumMax) * 100 : 0, esNumerica: true, maxP };
+  }
+  // Cotejo: la primera opción de la escala se considera "logrado"
+  const logrado = niveles[0];
+  let count = 0;
+  for (let i = 0; i < nFilas; i++) if (valoresArr[i] === logrado) count++;
+  const pct = nFilas > 0 ? (count / nFilas) * 100 : 0;
+  return { nota10: pct / 10, total: count, pct, esNumerica: false, maxP: 0 };
+}
+
+function EvaluarAlumnosModal({ evaluacion, grupo, userId, onClose }: {
+  evaluacion: Evaluacion; grupo: string; userId: string | null; onClose: () => void;
+}) {
+  const est = evaluacion.estructura as RubricaEstructura | null;
+  const [alumnos, setAlumnos] = useState<AlumnoMini[]>([]);
+  const [valores, setValores] = useState<Record<string, string[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const esCotejo = evaluacion.tipo === "cotejo";
+  const niveles = est?.niveles || [];
+  const filas = est?.filas || [];
+
+  useEffect(() => {
+    const cargar = async () => {
+      if (!userId || !grupo || !est) { setLoading(false); return; }
+      setLoading(true);
+      const { data: alums } = await supabase
+        .from("alumnos").select("id, nombre, apellidos, grupo, activo")
+        .eq("user_id", userId).eq("grupo", grupo).eq("activo", true).order("nombre");
+      const lista = (alums as AlumnoMini[]) || [];
+      setAlumnos(lista);
+
+      const { data: res } = await supabase
+        .from("evaluacion_resultados").select("alumno_id, valores")
+        .eq("user_id", userId).eq("evaluacion_id", evaluacion.id);
+      const map: Record<string, string[]> = {};
+      lista.forEach(a => { map[a.id] = new Array(filas.length).fill(""); });
+      (res || []).forEach((r: any) => {
+        const arr = Array.isArray(r.valores) ? r.valores : [];
+        map[r.alumno_id] = filas.map((_, i) => arr[i] || "");
+      });
+      setValores(map);
+      setLoading(false);
+    };
+    cargar();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, grupo, evaluacion.id]);
+
+  const setCelda = (alumnoId: string, filaIdx: number, val: string) => {
+    setValores(prev => {
+      const arr = [...(prev[alumnoId] || new Array(filas.length).fill(""))];
+      arr[filaIdx] = val;
+      return { ...prev, [alumnoId]: arr };
+    });
+  };
+
+  const guardar = async () => {
+    if (!userId || !est) return;
+    setSaving(true);
+    try {
+      for (const a of alumnos) {
+        const arr = valores[a.id] || [];
+        if (!arr.some(v => v)) continue; // sin calificar, saltar
+        await supabase.from("evaluacion_resultados").upsert({
+          user_id: userId, evaluacion_id: evaluacion.id, alumno_id: a.id, valores: arr,
+          actualizado_en: new Date().toISOString(),
+        }, { onConflict: "user_id,evaluacion_id,alumno_id" });
+        const { nota10 } = calcularResultado(est, arr);
+        await supabase.from("calificaciones_nem").upsert({
+          user_id: userId, evaluacion_id: evaluacion.id, alumno_id: a.id, nota: Number(nota10.toFixed(1)),
+        }, { onConflict: "user_id,evaluacion_id,alumno_id" });
+      }
+      toast.success("Evaluación guardada. Las calificaciones se reflejan en Reportes.");
+    } catch (e: any) {
+      if (e?.code === "42P01") toast.error("Falta la tabla. Corre el SQL del Lote 17 en Supabase.");
+      else toast.error("Error al guardar: " + (e?.message || ""));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const descargarPDF = () => {
+    if (!est) return;
+    const fecha = new Date().toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "numeric" });
+    const esc = (s: string) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const headIndicadores = filas.map((f, i) => `<th>${i + 1}. ${esc(f.indicador)}</th>`).join("");
+    const colExtra = esCotejo
+      ? `<th>Total ${esc(niveles[0] || "Sí")}</th><th>%</th>`
+      : `<th>Calificación</th>`;
+    const filasHTML = alumnos.map((a) => {
+      const arr = valores[a.id] || [];
+      const celdas = filas.map((_, i) => `<td>${esc(arr[i] || "—")}</td>`).join("");
+      const r = calcularResultado(est, arr);
+      const extra = esCotejo
+        ? `<td style="text-align:center"><b>${r.total}</b>/${filas.length}</td><td style="text-align:center">${r.pct.toFixed(0)}%</td>`
+        : `<td style="text-align:center"><b>${r.nota10.toFixed(1)}</b></td>`;
+      const nombre = `${esc(a.nombre)}${a.apellidos ? " " + esc(a.apellidos) : ""}`;
+      return `<tr><td style="text-align:left">${nombre}</td>${celdas}${extra}</tr>`;
+    }).join("");
+    const escalaInfo = esCotejo ? `<p><b>Escala:</b> ${niveles.map(esc).join(" / ")}</p>` : "";
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(evaluacion.titulo)}</title>
+      <style>
+        body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:24px}
+        h1{color:#6d28d9;font-size:18px;margin:0 0 4px}
+        h2{font-size:14px;margin:12px 0 6px}
+        p{font-size:12px;margin:2px 0;color:#374151}
+        table{border-collapse:collapse;width:100%;margin-top:10px;font-size:11px}
+        th,td{border:1px solid #cbd5e1;padding:5px 7px;text-align:center;vertical-align:top}
+        th{background:#ede9fe;color:#4c1d95;font-weight:bold}
+        td:first-child,th:first-child{text-align:left;min-width:140px}
+        .footer{margin-top:18px;font-size:10px;color:#9ca3af;text-align:right}
+        button,select,input{display:none !important}
+      </style></head><body>
+      <h1>${esc(evaluacion.titulo)}</h1>
+      <p><b>Tipo:</b> ${esCotejo ? "Lista de cotejo" : "Rúbrica"} &nbsp;·&nbsp; <b>Campo formativo:</b> ${esc(est.campo_formativo || "—")}</p>
+      <p><b>Grupo:</b> ${esc(grupo)} &nbsp;·&nbsp; <b>Generado:</b> ${fecha}</p>
+      ${escalaInfo}
+      <table><thead><tr><th>Alumno</th>${headIndicadores}${colExtra}</tr></thead>
+      <tbody>${filasHTML}</tbody></table>
+      <div class="footer">PlaneaDocente.com — Nueva Escuela Mexicana</div>
+      </body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) { toast.error("Permite las ventanas emergentes para descargar el PDF."); return; }
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 350);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3" onClick={onClose}>
+      <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
+        className="bg-card rounded-2xl border border-border w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <div>
+            <h3 className="font-semibold text-sm flex items-center gap-2"><GraduationCap className="w-4 h-4 text-blue-500" /> Evaluar: {evaluacion.titulo}</h3>
+            <p className="text-xs text-muted-foreground">{esCotejo ? "Lista de cotejo" : "Rúbrica"} · {grupo} · {filas.length} indicadores</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          {loading ? (
+            <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+          ) : !est ? (
+            <p className="text-sm text-muted-foreground text-center py-8">Esta evaluación no tiene estructura. Edítala primero.</p>
+          ) : alumnos.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">No hay alumnos activos en {grupo}.</p>
+          ) : (
+            <div className="overflow-x-auto border border-border rounded-xl">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-muted/60">
+                    <th className="text-left p-2 border-b border-border sticky left-0 bg-muted/60 min-w-[150px]">Alumno</th>
+                    {filas.map((f, i) => (
+                      <th key={i} className="text-left p-2 border-b border-l border-border min-w-[150px]" title={f.indicador}>
+                        {i + 1}. {f.indicador.length > 40 ? f.indicador.slice(0, 40) + "…" : f.indicador}
+                      </th>
+                    ))}
+                    <th className="text-center p-2 border-b border-l border-border min-w-[70px]">{esCotejo ? "Total" : "Calif."}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alumnos.map((a, idx) => {
+                    const arr = valores[a.id] || [];
+                    const r = calcularResultado(est, arr);
+                    return (
+                      <tr key={a.id} className={idx % 2 === 0 ? "bg-muted/10" : ""}>
+                        <td className="p-2 border-b border-border sticky left-0 bg-card font-medium">{a.nombre} {a.apellidos || ""}</td>
+                        {filas.map((_, fi) => (
+                          <td key={fi} className="p-1 border-b border-l border-border">
+                            <select value={arr[fi] || ""} onChange={e => setCelda(a.id, fi, e.target.value)}
+                              className="w-full bg-muted rounded-lg px-2 py-1.5 text-xs outline-none border border-border">
+                              <option value="">—</option>
+                              {niveles.map((n, ni) => <option key={ni} value={n}>{n}</option>)}
+                            </select>
+                          </td>
+                        ))}
+                        <td className="p-2 border-b border-l border-border text-center font-semibold">
+                          {esCotejo ? `${r.total}/${filas.length}` : r.nota10.toFixed(1)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-2 p-4 border-t border-border">
+          <Button variant="outline" className="gap-2" onClick={descargarPDF} disabled={loading || alumnos.length === 0}>
+            <Download className="w-4 h-4" /> Descargar PDF
+          </Button>
+          <div className="flex-1" />
+          <Button variant="outline" onClick={onClose}>Cerrar</Button>
+          <Button className="gap-2" onClick={guardar} disabled={saving || loading || alumnos.length === 0}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Guardar evaluación
+          </Button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+/* ═════════════════════ LISTAS DE COTEJO (constructor + evaluar) ═════════════════════ */
+
+const ESCALAS_COTEJO = [
+  ["Sí", "No"],
+  ["Logrado", "No logrado"],
+  ["Logrado", "En proceso", "No logrado"],
+];
+
+function CotejosView({ grupo, userId }: { grupo: string; userId: string | null }) {
+  const [items, setItems] = useState<Evaluacion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [editing, setEditing] = useState<Evaluacion | null>(null);
+  const [evaluando, setEvaluando] = useState<Evaluacion | null>(null);
+
+  const cargar = useCallback(async () => {
+    if (!grupo || !userId) return;
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("evaluaciones").select("*")
+      .eq("maestro_id", userId).eq("grupo", grupo).eq("tipo", "cotejo")
+      .order("created_at", { ascending: false });
+    if (!error && data) setItems(data as Evaluacion[]);
+    setLoading(false);
+  }, [grupo, userId]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const eliminar = async (id: string) => {
+    if (!confirm("¿Eliminar esta lista de cotejo?")) return;
+    await supabase.from("evaluaciones").delete().eq("id", id);
+    cargar();
+  };
+  const publicar = async (id: string) => {
+    const { error } = await supabase.from("evaluaciones").update({ estado: "publicado" }).eq("id", id);
+    if (!error) { toast.success("Lista publicada. Ya puedes evaluar a los alumnos."); cargar(); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="font-semibold">Listas de Cotejo</h3>
+        <Button size="sm" variant="outline" className="gap-2" onClick={() => { setEditing(null); setBuilderOpen(true); }}>
+          <Plus className="w-4 h-4" /> Nueva lista
+        </Button>
+      </div>
+
+      <AnimatePresence>
+        {builderOpen && (
+          <CotejoBuilder grupo={grupo} userId={userId} editing={editing}
+            onClose={() => setBuilderOpen(false)} onSaved={() => { setBuilderOpen(false); cargar(); }} />
+        )}
+      </AnimatePresence>
+
+      {evaluando && (
+        <EvaluarAlumnosModal evaluacion={evaluando} grupo={grupo} userId={userId} onClose={() => setEvaluando(null)} />
+      )}
+
+      {loading ? (
+        <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+      ) : items.length === 0 ? (
+        <div className="bg-card rounded-2xl p-10 border border-border text-center">
+          <CheckSquare className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+          <p className="text-muted-foreground">No hay listas de cotejo aún. Crea una con "Nueva lista".</p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {items.map((r) => {
+            const est = r.estructura || null;
+            const nFilas = est?.filas?.length ?? (Array.isArray(r.criterios) ? r.criterios.length : 0);
+            return (
+              <div key={r.id} className="bg-card rounded-xl border border-border p-4 flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+                  <CheckSquare className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-medium truncate">{r.titulo}</p>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${r.estado === "publicado" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{r.estado}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {r.campo_formativo || r.materia} · {nFilas} indicadores · escala: {(est?.niveles || []).join(" / ") || "—"}
+                  </p>
+                </div>
+                {est && (
+                  <Button size="sm" variant="ghost" className="text-xs h-7 text-blue-600 gap-1" onClick={() => setEvaluando(r)} title="Calificar alumnos">
+                    <GraduationCap className="w-3.5 h-3.5" /> Evaluar
+                  </Button>
+                )}
+                <button onClick={() => { setEditing(r); setBuilderOpen(true); }} className="p-2 hover:bg-primary/10 rounded-lg text-muted-foreground hover:text-primary" title="Editar">
+                  <Pencil className="w-4 h-4" />
+                </button>
+                {r.estado !== "publicado" && (
+                  <Button size="sm" variant="ghost" className="text-xs h-7 text-emerald-600" onClick={() => publicar(r.id)}>Publicar</Button>
+                )}
+                <button onClick={() => eliminar(r.id)} className="p-2 hover:bg-red-100 rounded-lg text-red-500" title="Eliminar"><Trash2 className="w-4 h-4" /></button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CotejoBuilder({ grupo, userId, editing, onClose, onSaved }: {
+  grupo: string; userId: string | null; editing: Evaluacion | null; onClose: () => void; onSaved: () => void;
+}) {
+  const est0 = editing?.estructura || null;
+  const [campoFormativo, setCampoFormativo] = useState(editing?.campo_formativo || est0?.campo_formativo || CAMPOS_FORMATIVOS[0]);
+  const [titulo, setTitulo] = useState(editing?.titulo || "");
+  const [escala, setEscala] = useState<string[]>(est0?.niveles?.length ? est0.niveles : ESCALAS_COTEJO[0]);
+  const [indicadores, setIndicadores] = useState<string[]>(
+    est0?.filas?.length ? est0.filas.map(f => f.indicador) : [""]
+  );
+  const [saving, setSaving] = useState(false);
+
+  const escalaKey = JSON.stringify(escala);
+  const setIndic = (i: number, v: string) => setIndicadores(prev => prev.map((x, j) => j === i ? v : x));
+  const addIndic = () => setIndicadores(prev => [...prev, ""]);
+  const removeIndic = (i: number) => { if (indicadores.length > 1) setIndicadores(prev => prev.filter((_, j) => j !== i)); };
+
+  const guardar = async () => {
+    if (!titulo.trim()) { toast.error("Escribe un título."); return; }
+    if (!userId || !grupo) { toast.error("Falta sesión o grupo."); return; }
+    const inds = indicadores.map(s => s.trim()).filter(Boolean);
+    if (inds.length === 0) { toast.error("Agrega al menos un indicador."); return; }
+    const estructura: RubricaEstructura = {
+      campo_formativo: campoFormativo,
+      niveles: escala,
+      filas: inds.map(i => ({ indicador: i, descriptores: [] })),
+    };
+    const payload = {
+      titulo: titulo.trim(), materia: campoFormativo, tipo: "cotejo" as const,
+      maestro_id: userId, user_id: userId, grupo, campo_formativo: campoFormativo,
+      criterios: inds, estructura,
+    };
+    setSaving(true);
+    let error;
+    if (editing) ({ error } = await supabase.from("evaluaciones").update(payload).eq("id", editing.id));
+    else ({ error } = await supabase.from("evaluaciones").insert({ ...payload, estado: "borrador" }));
+    setSaving(false);
+    if (error) {
+      if (error.code === "42703") toast.error("Faltan columnas en 'evaluaciones'. Corre el SQL del Lote 16.");
+      else toast.error("Error al guardar: " + error.message);
+      return;
+    }
+    toast.success(editing ? "Lista actualizada" : "Lista de cotejo creada");
+    onSaved();
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+      className="bg-card rounded-2xl p-5 border border-border space-y-4 overflow-hidden">
+      <div className="flex items-center justify-between">
+        <h4 className="font-semibold text-sm flex items-center gap-2"><CheckSquare className="w-4 h-4 text-emerald-500" /> {editing ? "Editar lista de cotejo" : "Nueva lista de cotejo"}</h4>
+        <button onClick={onClose} className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground"><X className="w-4 h-4" /></button>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Campo formativo (NEM)</label>
+          <select value={campoFormativo} onChange={e => setCampoFormativo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+            {CAMPOS_FORMATIVOS.map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Escala</label>
+          <select value={escalaKey} onChange={e => setEscala(JSON.parse(e.target.value))} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+            {ESCALAS_COTEJO.map((s, i) => <option key={i} value={JSON.stringify(s)}>{s.join(" / ")}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-muted-foreground mb-1 block">Título</label>
+        <input value={titulo} onChange={e => setTitulo(e.target.value)} placeholder="Ej: Lista de cotejo — Exposición de proyecto" className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border" />
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-xs font-medium text-muted-foreground">Indicadores / aspectos a evaluar</label>
+          <Button size="sm" variant="ghost" className="text-xs h-7" onClick={addIndic}>+ Indicador</Button>
+        </div>
+        <div className="space-y-2">
+          {indicadores.map((c, i) => (
+            <div key={i} className="flex gap-2">
+              <span className="text-xs text-muted-foreground w-5 pt-2">{i + 1}.</span>
+              <input value={c} onChange={e => setIndic(i, e.target.value)} placeholder={`Indicador ${i + 1} (enunciado corto)`} className="flex-1 bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border" />
+              {indicadores.length > 1 && <button onClick={() => removeIndic(i)} className="p-2 hover:bg-red-100 rounded-lg text-red-500"><X className="w-4 h-4" /></button>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Button variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
+        <Button className="flex-1 gap-2" onClick={guardar} disabled={saving || !titulo.trim()}>
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {editing ? "Guardar cambios" : "Guardar lista"}
+        </Button>
+      </div>
+    </motion.div>
   );
 }
