@@ -180,3 +180,12 @@ button, nav { user-select: none; -webkit-user-select: none; }
 p, span, h1, h2, h3, h4, h5, li, td, th, label, a, pre, code, blockquote {
   user-select: text; -webkit-user-select: text;
 }
+
+/* Desactivar animaciones cuando el usuario lo elige en Configuración */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}

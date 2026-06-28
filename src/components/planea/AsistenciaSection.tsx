@@ -562,6 +562,19 @@ function ReportesView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Default del grupo desde los alumnos reales del maestro (en vez de 1° A)
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) return;
+      const { data } = await supabase.from("alumnos").select("grupo").eq("user_id", uid).eq("activo", true);
+      if (data && data.length > 0) {
+        setGrupo((g) => (g === GRUPOS[0] ? grupoMasComun(data as { grupo?: string }[], g) : g));
+      }
+    })();
+  }, []);
+
   const registrosGrupo = asistencias.filter((a) => a.grupo === grupo);
 
   const stats = useMemo(() => {

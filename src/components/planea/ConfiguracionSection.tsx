@@ -743,11 +743,20 @@ function AparienciaManager() {
         root.classList.remove("dark");
       }
     }
-    root.style.setProperty("--primary-color", apariencia.color_primario);
+    // Color principal: el tema usa la variable --primary directamente (acepta hex)
+    root.style.setProperty("--primary", apariencia.color_primario);
+    root.style.setProperty("--ring", apariencia.color_primario);
     const radios = { small: "0.5rem", medium: "0.75rem", large: "1rem" };
     root.style.setProperty("--radius", radios[apariencia.radio_borde]);
+    // Tamaño de texto: escala la raíz (afecta todo lo que usa rem)
     const escalas = { compact: "14px", normal: "16px", large: "18px" };
-    root.style.setProperty("--base-font-size", escalas[apariencia.fuente_escala]);
+    root.style.fontSize = escalas[apariencia.fuente_escala];
+    // Animaciones: agrega/quita la clase que las desactiva
+    if (apariencia.animaciones === false) {
+      root.classList.add("reduce-motion");
+    } else {
+      root.classList.remove("reduce-motion");
+    }
 
     if (userId) {
       await supabase.from("configuracion").upsert(

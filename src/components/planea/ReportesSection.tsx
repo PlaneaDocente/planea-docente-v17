@@ -102,7 +102,7 @@ export default function ReportesSection() {
 
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" id="reporte-print-area">
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Reportes</h1>
