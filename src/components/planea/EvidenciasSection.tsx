@@ -71,6 +71,8 @@ export default function EvidenciasSection() {
   const [grupoSeleccionado, setGrupoSeleccionado] = useState<string>("3°A");
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [alumnosGrupo, setAlumnosGrupo] = useState<{ id: string; nombre: string }[]>([]);
+  const [alumnoSel, setAlumnoSel] = useState<string>("");
 
   // Cargar grupos desde alumnos del usuario
   useEffect(() => {
@@ -107,6 +109,22 @@ export default function EvidenciasSection() {
     { id: "portafolio" as TabId, label: "Portafolio Digital", icon: FolderOpen },
   ];
 
+  useEffect(() => {
+    const cargarAlumnos = async () => {
+      if (!userId || !grupoSeleccionado) { setAlumnosGrupo([]); return; }
+      const { data } = await supabase
+        .from("alumnos")
+        .select("id, nombre")
+        .eq("user_id", userId)
+        .eq("grupo", grupoSeleccionado)
+        .eq("activo", true)
+        .order("nombre", { ascending: true });
+      setAlumnosGrupo((data as { id: string; nombre: string }[]) || []);
+      setAlumnoSel("");
+    };
+    cargarAlumnos();
+  }, [userId, grupoSeleccionado]);
+
   if (loading) {
     return (
       <div className="space-y-5">
@@ -136,6 +154,23 @@ export default function EvidenciasSection() {
           {gruposDisponibles.map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
       </div>
+
+      {/* Selector de alumno (opcional) — solo aplica a Fotos/Documentos/Videos */}
+      {activeTab !== "portafolio" && (
+        <div className="bg-card rounded-xl p-3 border border-border">
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            Alumno (opcional — para el portafolio individual)
+          </label>
+          <select
+            value={alumnoSel}
+            onChange={(e) => setAlumnoSel(e.target.value)}
+            className="w-full bg-muted rounded-lg px-3 py-2 text-sm outline-none border border-border focus:border-primary transition-colors"
+          >
+            <option value="">General del grupo (sin alumno específico)</option>
+            {alumnosGrupo.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+          </select>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
@@ -170,9 +205,9 @@ export default function EvidenciasSection() {
           exit={{ opacity: 0, y: -10 }}
           transition={{ duration: 0.2 }}
         >
-          {activeTab === "fotos" && <FotosView grupo={grupoSeleccionado} userId={userId} />}
-          {activeTab === "documentos" && <DocumentosView grupo={grupoSeleccionado} userId={userId} />}
-          {activeTab === "videos" && <VideosView grupo={grupoSeleccionado} userId={userId} />}
+          {activeTab === "fotos" && <FotosView grupo={grupoSeleccionado} userId={userId} alumnoId={alumnoSel} alumnoNombre={alumnosGrupo.find((a) => a.id === alumnoSel)?.nombre || ""} />}
+          {activeTab === "documentos" && <DocumentosView grupo={grupoSeleccionado} userId={userId} alumnoId={alumnoSel} alumnoNombre={alumnosGrupo.find((a) => a.id === alumnoSel)?.nombre || ""} />}
+          {activeTab === "videos" && <VideosView grupo={grupoSeleccionado} userId={userId} alumnoId={alumnoSel} alumnoNombre={alumnosGrupo.find((a) => a.id === alumnoSel)?.nombre || ""} />}
           {activeTab === "portafolio" && <PortafolioView grupo={grupoSeleccionado} userId={userId} />}
         </motion.div>
       </AnimatePresence>
@@ -182,7 +217,7 @@ export default function EvidenciasSection() {
 
 /* ═════════════════════ FOTOS VIEW (SUPABASE) ═════════════════════ */
 
-function FotosView({ grupo, userId }: { grupo: string; userId: string | null }) {
+function FotosView({ grupo, userId, alumnoId, alumnoNombre }: { grupo: string; userId: string | null; alumnoId?: string; alumnoNombre?: string }) {
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -271,6 +306,8 @@ function FotosView({ grupo, userId }: { grupo: string; userId: string | null }) 
           storage_path: path,
           tipo,
           grupo,
+          alumno_id: alumnoId || null,
+          alumno_nombre: alumnoNombre || null,
           size_bytes: file.size,
         });
 
@@ -599,7 +636,7 @@ function MinimizeIcon() {
 
 /* ═════════════════════ DOCUMENTOS VIEW (SUPABASE) ═════════════════════ */
 
-function DocumentosView({ grupo, userId }: { grupo: string; userId: string | null }) {
+function DocumentosView({ grupo, userId, alumnoId, alumnoNombre }: { grupo: string; userId: string | null; alumnoId?: string; alumnoNombre?: string }) {
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [search, setSearch] = useState("");
@@ -648,7 +685,7 @@ function DocumentosView({ grupo, userId }: { grupo: string; userId: string | nul
         const { data: urlData } = supabase.storage.from("evidencias").getPublicUrl(path);
         const { error: dbError } = await supabase.from("evidencias").insert({
           user_id: userId, titulo: file.name, url: urlData?.publicUrl || "", storage_path: path,
-          tipo: "documento", grupo, size_bytes: file.size,
+          tipo: "documento", grupo, alumno_id: alumnoId || null, alumno_nombre: alumnoNombre || null, size_bytes: file.size,
         });
         if (dbError) throw dbError;
         subidas++;
@@ -771,7 +808,7 @@ function DocumentosView({ grupo, userId }: { grupo: string; userId: string | nul
 
 /* ═════════════════════ VIDEOS VIEW (SUPABASE) ═════════════════════ */
 
-function VideosView({ grupo, userId }: { grupo: string; userId: string | null }) {
+function VideosView({ grupo, userId, alumnoId, alumnoNombre }: { grupo: string; userId: string | null; alumnoId?: string; alumnoNombre?: string }) {
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [search, setSearch] = useState("");
@@ -818,7 +855,7 @@ function VideosView({ grupo, userId }: { grupo: string; userId: string | null })
         const { data: urlData } = supabase.storage.from("evidencias").getPublicUrl(path);
         const { error: dbError } = await supabase.from("evidencias").insert({
           user_id: userId, titulo: file.name, url: urlData?.publicUrl || "", storage_path: path,
-          tipo: "video", grupo, size_bytes: file.size,
+          tipo: "video", grupo, alumno_id: alumnoId || null, alumno_nombre: alumnoNombre || null, size_bytes: file.size,
         });
         if (dbError) throw dbError;
         subidas++;

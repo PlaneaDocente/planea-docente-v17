@@ -360,6 +360,29 @@ function BibliotecaActividades() {
     (a.materia || "").toLowerCase().includes(search.toLowerCase())
   );
 
+  const usarActividad = async (a: ActividadBiblioteca) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (!uid) { toast.error("Inicia sesión para usar la actividad"); return; }
+      const contenido = `**${a.titulo}**\n\nCampo formativo: ${a.materia || "—"}\nGrado sugerido: ${a.grado || "—"}\nDuración: ${a.duracion} min\n\n${a.descripcion || ""}`;
+      const { error } = await supabase.from("planeaciones").insert({
+        maestro_id: uid,
+        titulo: a.titulo,
+        materia: a.materia,
+        grado: a.grado,
+        tipo_planeacion: "biblioteca",
+        contenido,
+        generada_por_ia: false,
+        estado: "borrador",
+      });
+      if (error) throw error;
+      toast.success("✅ Agregada a Planeación → Mis Planeaciones");
+    } catch (err: any) {
+      toast.error("No se pudo agregar: " + (err.message || ""));
+    }
+  };
+
   if (loading) {
     return <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   }
@@ -402,7 +425,7 @@ function BibliotecaActividades() {
             </div>
             <div className="text-right shrink-0">
               <p className="text-xs text-muted-foreground">{a.usos} usos</p>
-              <Button size="sm" variant="outline" className="text-xs h-7 mt-1" onClick={() => toast.success("Actividad agregada a tu planeación")}>Usar</Button>
+              <Button size="sm" variant="outline" className="text-xs h-7 mt-1" onClick={() => usarActividad(a)}>Usar</Button>
             </div>
           </motion.div>
         ))}

@@ -84,6 +84,8 @@ export default function ReportesSection() {
         th{background:#6d28d9;color:#fff;padding:6px 10px;text-align:left}
         td{padding:5px 10px;border-bottom:1px solid #e5e7eb}
         tr:nth-child(even){background:#f9fafb}
+        button,select,input,textarea,[role="button"]{display:none !important}
+        svg{max-width:100% !important;height:auto !important}
         .footer{margin-top:20px;font-size:10px;color:#9ca3af;text-align:right}
       </style></head><body>
       <h1>Reporte PlaneaDocente — NEM</h1>
@@ -310,7 +312,7 @@ function ReporteEvaluacion({ grupo, userId }: { grupo: string; userId: string | 
         const resultados: any[] = [];
         for (const ev of (evals || [])) {
           const { data: cals, error: calError } = await supabase
-            .from("calificaciones")
+            .from("calificaciones_nem")
             .select("nota")
             .eq("evaluacion_id", ev.id);
 
