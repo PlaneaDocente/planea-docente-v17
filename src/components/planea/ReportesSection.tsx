@@ -188,13 +188,13 @@ function ReporteAsistencia({ grupo, userId }: { grupo: string; userId: string | 
 
         const conteo = { presentes: 0, ausentes: 0, justificados: 0, retardos: 0, total: 0 };
         (data || []).forEach((row: any) => {
-          const regs = row.registros || {};
-          Object.values(regs).forEach((estado: any) => {
+          const regs = Array.isArray(row.registros) ? row.registros : [];
+          regs.forEach((r: any) => {
             conteo.total++;
-            if (estado === "presente") conteo.presentes++;
-            else if (estado === "ausente") conteo.ausentes++;
-            else if (estado === "justificado") conteo.justificados++;
-            else if (estado === "retardo") conteo.retardos++;
+            if (r.estado === "presente") conteo.presentes++;
+            else if (r.estado === "ausente") conteo.ausentes++;
+            else if (r.estado === "justificado") conteo.justificados++;
+            else if (r.estado === "retardo") conteo.retardos++;
           });
         });
         setStats(conteo);
@@ -217,10 +217,10 @@ function ReporteAsistencia({ grupo, userId }: { grupo: string; userId: string | 
 
           let p = 0, a = 0;
           (mesData || []).forEach((row: any) => {
-            const regs = row.registros || {};
-            Object.values(regs).forEach((estado: any) => {
-              if (estado === "presente") p++;
-              else if (estado === "ausente") a++;
+            const regs = Array.isArray(row.registros) ? row.registros : [];
+            regs.forEach((r: any) => {
+              if (r.estado === "presente") p++;
+              else if (r.estado === "ausente") a++;
             });
           });
 
