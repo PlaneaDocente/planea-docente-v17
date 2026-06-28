@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Bell, MessageSquare, Plus, CheckCircle2, Loader2, Users,
   Megaphone, BookOpen, Trash2, X, Search, Phone, Mail,
-  Smartphone, UserPlus, Hash, Eye,
+  Smartphone, UserPlus, Hash, Eye, Pencil,
   RefreshCw, Info, CloudOff, Cloud
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -592,6 +592,7 @@ function PadresView() {
   const [search, setSearch] = useState("");
   const [grupoFilter, setGrupoFilter] = useState("");
   const [loading, setLoading] = useState(true);
+  const [editingPadre, setEditingPadre] = useState<Padre | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -736,6 +737,9 @@ function PadresView() {
                     <Mail className="w-4 h-4" />
                   </button>
                 )}
+                <button onClick={() => setEditingPadre(p)} className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Editar">
+                  <Pencil className="w-4 h-4" />
+                </button>
                 <button onClick={() => handleDelete(p.id)} className="p-2 rounded-lg bg-muted text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors" title="Eliminar">
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -744,7 +748,100 @@ function PadresView() {
           </motion.div>
         ))}
       </div>
+
+      <AnimatePresence>
+        {editingPadre && (
+          <EditarPadreModal
+            padre={editingPadre}
+            onClose={() => setEditingPadre(null)}
+            onSaved={(actualizado) => {
+              setPadres((prev) => prev.map((x) => x.id === actualizado.id ? actualizado : x));
+              setEditingPadre(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+/* ─── Editar Padre ─── */
+
+function EditarPadreModal({ padre, onClose, onSaved }: { padre: Padre; onClose: () => void; onSaved: (p: Padre) => void }) {
+  const userId = useAuthUser();
+  const [nombre, setNombre] = useState(padre.nombre);
+  const [telefono, setTelefono] = useState(padre.telefono || "");
+  const [email, setEmail] = useState(padre.email || "");
+  const [grupo, setGrupo] = useState(padre.grupo || GRUPOS[0]);
+  const [alumnoId, setAlumnoId] = useState(padre.alumno_id || "");
+  const [nombreHijo, setNombreHijo] = useState(padre.nombre_hijo || "");
+  const [saving, setSaving] = useState(false);
+  const [alumnos] = useStoreItem(store.alumnos);
+
+  const handleUpdate = async () => {
+    if (!nombre.trim() || !alumnoId) { toast.error("El nombre del padre/madre y el alumno vinculado son obligatorios."); return; }
+    if (!userId) { toast.error("Inicia sesión para guardar."); return; }
+    const alumno = alumnos.find((a) => a.id === alumnoId);
+    setSaving(true);
+    const cambios = {
+      nombre: nombre.trim(),
+      telefono: telefono.trim(),
+      email: email.trim(),
+      grupo: alumno?.grupo || grupo,
+      nombre_hijo: alumno?.nombre || nombreHijo.trim(),
+      alumno_id: alumnoId || null,
+    };
+    const { data, error } = await supabase.from("padres").update(cambios).eq("id", padre.id).eq("user_id", userId).select().maybeSingle();
+    setSaving(false);
+    if (error) { toast.error("Error guardando: " + error.message); return; }
+    toast.success("Padre actualizado correctamente.");
+    onSaved((data as Padre) || { ...padre, ...cambios, alumno_id: alumnoId } as Padre);
+  };
+
+  return (
+    <ModalWrapper title="Editar Padre de Familia" icon={Pencil} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nombre completo del padre/madre *</label>
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Alumno vinculado (hijo/a) *</label>
+          <select
+            value={alumnoId}
+            onChange={(e) => {
+              const al = alumnos.find((a) => a.id === e.target.value);
+              setAlumnoId(e.target.value);
+              setNombreHijo(al?.nombre || "");
+              if (al?.grupo) setGrupo(al.grupo);
+            }}
+            className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary"
+          >
+            <option value="">Selecciona un alumno…</option>
+            {alumnos.map((a) => (
+              <option key={a.id} value={a.id}>{a.nombre}{a.grupo ? ` — ${a.grupo}` : ""}</option>
+            ))}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Teléfono (WhatsApp)</label>
+            <input value={telefono} onChange={(e) => setTelefono(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Correo electrónico</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+          </div>
+        </div>
+        <div className="flex gap-3 pt-2">
+          <Button variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button className="flex-1 gap-2" onClick={handleUpdate} disabled={saving}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            {saving ? "Guardando..." : "Guardar cambios"}
+          </Button>
+        </div>
+      </div>
+    </ModalWrapper>
   );
 }
 
@@ -1004,24 +1101,25 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [grupo, setGrupo] = useState(GRUPOS[0]);
   const [nombreHijo, setNombreHijo] = useState("");
+  const [alumnoId, setAlumnoId] = useState("");
   const [saving, setSaving] = useState(false);
   const [alumnos] = useStoreItem(store.alumnos);
   const [, setPadres] = useStoreItem(store.padres);
 
   const handleSave = async () => {
-    if (!nombre.trim() || !nombreHijo.trim()) { toast.error("Nombre del padre y del hijo son obligatorios."); return; }
+    if (!nombre.trim() || !alumnoId) { toast.error("El nombre del padre/madre y el alumno vinculado son obligatorios."); return; }
     if (!userId) { toast.error("Inicia sesión para guardar."); return; }
 
-    const alumno = alumnos.find((a) => a.nombre.toLowerCase().includes(nombreHijo.toLowerCase()) || nombreHijo.toLowerCase().includes(a.nombre.toLowerCase()));
+    const alumno = alumnos.find((a) => a.id === alumnoId);
 
     setSaving(true);
     const nuevo: Omit<Padre, "id"> = {
       nombre: nombre.trim(),
       telefono: telefono.trim(),
       email: email.trim(),
-      grupo,
-      nombre_hijo: nombreHijo.trim(),
-      alumno_id: alumno?.id || "",
+      grupo: alumno?.grupo || grupo,
+      nombre_hijo: alumno?.nombre || nombreHijo.trim(),
+      alumno_id: alumnoId,
       activo: true,
       creado_en: new Date().toISOString(),
     };
@@ -1066,8 +1164,25 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
           <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Juan Pérez García" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Nombre del hijo/a *</label>
-          <input value={nombreHijo} onChange={(e) => setNombreHijo(e.target.value)} placeholder="Ej: Ana Pérez" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary" />
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Alumno vinculado (hijo/a) *</label>
+          <select
+            value={alumnoId}
+            onChange={(e) => {
+              const al = alumnos.find((a) => a.id === e.target.value);
+              setAlumnoId(e.target.value);
+              setNombreHijo(al?.nombre || "");
+              if (al?.grupo) setGrupo(al.grupo);
+            }}
+            className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary"
+          >
+            <option value="">Selecciona un alumno…</option>
+            {alumnos.map((a) => (
+              <option key={a.id} value={a.id}>{a.nombre}{a.grupo ? ` — ${a.grupo}` : ""}</option>
+            ))}
+          </select>
+          {alumnos.length === 0 && (
+            <p className="text-xs text-amber-600 mt-1">No tienes alumnos registrados. Agrégalos primero en la sección Alumnos.</p>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>

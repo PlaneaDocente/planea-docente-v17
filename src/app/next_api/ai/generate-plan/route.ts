@@ -13,6 +13,8 @@ export async function POST(req: Request) {
       grado = "",
       tema = "",
       campo_formativo = "General",
+      eje_articulador = "",
+      metodologia = "",
       semanas = 1,
     } = await req.json();
 
@@ -29,7 +31,11 @@ Genera una planeación didáctica COMPLETA, DETALLADA y PROFESIONAL para:
 - Grado: ${grado || "Primaria"}
 - Tema/Contenido: ${tema}
 - Campo Formativo NEM: ${campo_formativo}
+- Eje Articulador NEM: ${eje_articulador || "el más pertinente al tema"}
+- Metodología NEM: ${metodologia || "la más adecuada al contenido"}
 - Duración: ${semanas} semana(s)
+
+IMPORTANTE: estructura la planeación siguiendo la metodología "${metodologia || "didáctica NEM"}" e integra de forma explícita el eje articulador "${eje_articulador || "pertinente"}" a lo largo de las actividades.
 
 La planeación DEBE incluir TODAS estas secciones con contenido REAL y DETALLADO:
 

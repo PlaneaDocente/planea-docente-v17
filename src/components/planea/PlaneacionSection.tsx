@@ -502,6 +502,9 @@ function AIGeneratorModal({ onClose, userId }: { onClose: () => void; userId: st
   const [materia, setMateria] = useState("Matemáticas");
   const [grado, setGrado] = useState("3° Primaria");
   const [tema, setTema] = useState("");
+  const [campoFormativo, setCampoFormativo] = useState("Saberes y Pensamiento Científico");
+  const [ejeArticulador, setEjeArticulador] = useState("Pensamiento crítico");
+  const [metodologia, setMetodologia] = useState("Aprendizaje Basado en Indagación (STEAM)");
   const [generating, setGenerating] = useState(false);
   const [planeacionGenerada, setPlaneacionGenerada] = useState<string | null>(null);
 
@@ -513,7 +516,7 @@ function AIGeneratorModal({ onClose, userId }: { onClose: () => void; userId: st
       const res = await fetch("/next_api/ai/generate-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ materia, grado, tema }),
+        body: JSON.stringify({ materia, grado, tema, campo_formativo: campoFormativo, eje_articulador: ejeArticulador, metodologia }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error desconocido");
@@ -578,6 +581,38 @@ function AIGeneratorModal({ onClose, userId }: { onClose: () => void; userId: st
                   <option>1° Primaria</option><option>2° Primaria</option><option>3° Primaria</option><option>4° Primaria</option><option>5° Primaria</option><option>6° Primaria</option>
                 </select>
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Campo formativo (NEM)</label>
+                <select className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border" value={campoFormativo} onChange={(e) => setCampoFormativo(e.target.value)}>
+                  <option>Lenguajes</option>
+                  <option>Saberes y Pensamiento Científico</option>
+                  <option>Ética, Naturaleza y Sociedades</option>
+                  <option>De lo Humano y lo Comunitario</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Eje articulador (NEM)</label>
+                <select className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border" value={ejeArticulador} onChange={(e) => setEjeArticulador(e.target.value)}>
+                  <option>Inclusión</option>
+                  <option>Pensamiento crítico</option>
+                  <option>Interculturalidad crítica</option>
+                  <option>Igualdad de género</option>
+                  <option>Vida saludable</option>
+                  <option>Apropiación de las culturas a través de la lectura y la escritura</option>
+                  <option>Artes y experiencias estéticas</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Metodología (NEM)</label>
+              <select className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border" value={metodologia} onChange={(e) => setMetodologia(e.target.value)}>
+                <option>Aprendizaje Basado en Proyectos Comunitarios (ABPC)</option>
+                <option>Aprendizaje Basado en Indagación (STEAM)</option>
+                <option>Aprendizaje Basado en Problemas (ABP)</option>
+                <option>Aprendizaje Servicio</option>
+              </select>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">Tema o contenido</label>
