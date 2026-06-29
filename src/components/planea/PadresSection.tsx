@@ -425,6 +425,20 @@ function MensajesView() {
   const [enviando, setEnviando] = useState(false);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [padresGrupo, setPadresGrupo] = useState<any[]>([]);
+
+  useEffect(() => {
+    const cargarPadres = async () => {
+      if (!userId || !grupoSeleccionado) { setPadresGrupo([]); return; }
+      const { data } = await supabase
+        .from("padres")
+        .select("id, nombre, telefono, email, nombre_hijo, activo, grupo")
+        .eq("user_id", userId)
+        .eq("grupo", grupoSeleccionado);
+      setPadresGrupo((data || []).filter((p: any) => p.activo !== false));
+    };
+    cargarPadres();
+  }, [userId, grupoSeleccionado]);
 
   // Cargar mensajes
   useEffect(() => {
@@ -526,9 +540,52 @@ function MensajesView() {
           {noLeidos > 0 && <Badge variant="destructive" className="text-xs">{noLeidos} nuevo{noLeidos > 1 ? "s" : ""}</Badge>}
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Cloud className="w-3 h-3" />
-          <span>Realtime activo</span>
+          <Users className="w-3 h-3" />
+          <span>{padresGrupo.length} padre{padresGrupo.length === 1 ? "" : "s"} registrado{padresGrupo.length === 1 ? "" : "s"} en {grupoSeleccionado}</span>
         </div>
+      </div>
+
+      {/* Enviar el mensaje a los padres registrados del grupo */}
+      <div className="bg-card rounded-2xl border border-border p-4">
+        <p className="text-xs font-medium text-muted-foreground mb-2">
+          Enviar a los padres registrados de {grupoSeleccionado} (escribe el mensaje abajo y elige cómo enviarlo a cada uno)
+        </p>
+        {padresGrupo.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No hay padres registrados en este grupo. Agrégalos en la pestaña <span className="font-medium">Padres de Familia</span> para poder enviarles mensajes.
+          </p>
+        ) : (
+          <div className="grid sm:grid-cols-2 gap-2">
+            {padresGrupo.map((p) => (
+              <div key={p.id} className="flex items-center justify-between gap-2 bg-muted/40 rounded-xl px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{p.nombre}</p>
+                  {p.nombre_hijo && <p className="text-[11px] text-muted-foreground truncate">Hijo/a: {p.nombre_hijo}</p>}
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <button
+                    onClick={() => {
+                      if (!newMsg.trim()) { toast.error("Escribe primero el mensaje abajo."); return; }
+                      if (!p.telefono) { toast.error("Este padre no tiene teléfono."); return; }
+                      openWhatsApp(p.telefono, `Hola ${p.nombre}: ${newMsg.trim()}`);
+                    }}
+                    className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-green-600 hover:bg-green-50" title="Enviar por WhatsApp">
+                    <Smartphone className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!newMsg.trim()) { toast.error("Escribe primero el mensaje abajo."); return; }
+                      if (!p.email) { toast.error("Este padre no tiene correo."); return; }
+                      openEmail(p.email, `Mensaje del maestro — ${grupoSeleccionado}`, `Estimado/a ${p.nombre}:\n\n${newMsg.trim()}`);
+                    }}
+                    className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-blue-600 hover:bg-blue-50" title="Enviar por correo">
+                    <Mail className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">

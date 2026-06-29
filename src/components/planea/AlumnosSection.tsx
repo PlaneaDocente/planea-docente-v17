@@ -638,6 +638,32 @@ function NuevoTutorModal({ onClose, alumnos, userId }: { onClose: () => void; al
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
+  const [padres, setPadres] = useState<any[]>([]);
+  const [padreVinculado, setPadreVinculado] = useState("");
+
+  useEffect(() => {
+    const cargarPadres = async () => {
+      if (!userId) return;
+      const { data } = await supabase
+        .from("padres")
+        .select("id, nombre, telefono, email, alumno_id, nombre_hijo, grupo")
+        .eq("user_id", userId)
+        .order("nombre", { ascending: true });
+      setPadres(data || []);
+    };
+    cargarPadres();
+  }, [userId]);
+
+  const aplicarPadre = (padreId: string) => {
+    setPadreVinculado(padreId);
+    const p = padres.find((x) => x.id === padreId);
+    if (!p) return;
+    setNombre(p.nombre || "");
+    setTelefono(p.telefono || "");
+    setEmail(p.email || "");
+    setParentesco("Padre/Madre");
+    if (p.alumno_id && alumnos.some((a) => a.id === p.alumno_id)) setAlumnoId(p.alumno_id);
+  };
 
   const handleSave = async () => {
     if (!alumnoId || !nombre.trim()) { toast.error("Alumno y nombre del tutor son obligatorios."); return; }
@@ -677,6 +703,18 @@ function NuevoTutorModal({ onClose, alumnos, userId }: { onClose: () => void; al
   return (
     <ModalWrapper title="Nuevo Tutor" icon={HeartHandshake} onClose={onClose}>
       <div className="space-y-4">
+        {padres.length > 0 && (
+          <div className="bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800 rounded-xl p-3">
+            <label className="text-xs font-medium text-cyan-700 dark:text-cyan-300 mb-1.5 block">Vincular con un padre de familia registrado (opcional)</label>
+            <select value={padreVinculado} onChange={(e) => aplicarPadre(e.target.value)} className="w-full bg-card rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
+              <option value="">— Escribir manualmente —</option>
+              {padres.map((p) => (
+                <option key={p.id} value={p.id}>{p.nombre}{p.nombre_hijo ? ` (hijo/a: ${p.nombre_hijo})` : ""}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-cyan-700/80 dark:text-cyan-300/80 mt-1">Se autocompletan nombre, teléfono, correo y el alumno vinculado.</p>
+          </div>
+        )}
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Alumno *</label>
           <select value={alumnoId} onChange={(e) => setAlumnoId(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
