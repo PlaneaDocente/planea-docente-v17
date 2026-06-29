@@ -98,6 +98,7 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
   grupo: string; asunto: string; cuerpo: string; userId: string | null; onClose: () => void;
 }) {
   const [padres, setPadres] = useState<any[]>([]);
+  const [todos, setTodos] = useState<any[]>([]);
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
 
@@ -105,9 +106,12 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
     const load = async () => {
       if (!userId) { setLoading(false); return; }
       const { data } = await supabase.from("padres")
-        .select("id, nombre, telefono, email, nombre_hijo, activo")
-        .eq("user_id", userId).eq("grupo", grupo);
-      const activos = (data || []).filter((p: any) => p.activo !== false);
+        .select("id, nombre, telefono, email, nombre_hijo, activo, grupo")
+        .eq("user_id", userId);
+      const objetivo = normGrupo(grupo);
+      const todosActivos = (data || []).filter((p: any) => p.activo !== false);
+      setTodos(todosActivos);
+      const activos = todosActivos.filter((p: any) => normGrupo(p.grupo) === objetivo);
       setPadres(activos);
       const all: Record<string, boolean> = {};
       activos.forEach((p: any) => { all[p.id] = true; });
@@ -141,7 +145,13 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
         {loading ? (
           <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
         ) : padres.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No hay padres activos registrados en {grupo}. Agrégalos en la pestaña Padres de Familia.</p>
+          <div className="text-sm text-muted-foreground space-y-2">
+            <p>No hay padres activos registrados en <b>{grupo}</b>.</p>
+            {todos.length > 0 && (
+              <p>Sí tienes padres registrados en: <b>{Array.from(new Set(todos.map((p) => p.grupo))).join(", ")}</b>. Verifica que el grupo del aviso/mensaje coincida con el de esos padres, o registra padres en {grupo} desde la pestaña Padres de Familia.</p>
+            )}
+            {todos.length === 0 && <p>Aún no tienes padres registrados. Agrégalos en la pestaña Padres de Familia.</p>}
+          </div>
         ) : (
           <>
             <div className="flex items-center justify-between">
@@ -179,6 +189,14 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
   );
 }
 
+function normGrupo(s: string): string {
+  return (s || "")
+    .replace(/[º°]/g, "°")   // unifica símbolo de grado (U+00BA y U+00B0)
+    .replace(/\s+/g, "")      // quita TODOS los espacios
+    .toUpperCase()
+    .trim();
+}
+
 function useGruposReales(): string[] {
   const userId = useAuthUser();
   const [grupos, setGrupos] = useState<string[]>(GRUPOS);
@@ -186,9 +204,17 @@ function useGruposReales(): string[] {
     if (!userId) return;
     supabase.from("alumnos").select("grupo").eq("user_id", userId).eq("activo", true)
       .then(({ data }) => {
-        const set = Array.from(new Set((data || []).map((a: any) => (a.grupo || "").trim()).filter(Boolean)))
-          .sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
-        if (set.length > 0) setGrupos(set as string[]);
+        // Dedupe por forma normalizada, conservando la primera variante vista
+        const vistos = new Set<string>();
+        const lista: string[] = [];
+        (data || []).forEach((a: any) => {
+          const g = (a.grupo || "").trim();
+          if (!g) return;
+          const key = normGrupo(g);
+          if (!vistos.has(key)) { vistos.add(key); lista.push(g); }
+        });
+        lista.sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+        if (lista.length > 0) setGrupos(lista);
       });
   }, [userId]);
   return grupos;
@@ -297,7 +323,7 @@ function AvisosView() {
 
   const filtered = avisos.filter((a) => {
     const matchSearch = a.titulo.toLowerCase().includes(search.toLowerCase()) || a.mensaje.toLowerCase().includes(search.toLowerCase());
-    const matchGrupo = !grupoFilter || a.grupo === grupoFilter;
+    const matchGrupo = !grupoFilter || normGrupo(a.grupo) === normGrupo(grupoFilter);
     return matchSearch && matchGrupo;
   });
 
@@ -579,9 +605,9 @@ function MensajesView() {
       const { data } = await supabase
         .from("padres")
         .select("id, nombre, telefono, email, nombre_hijo, activo, grupo")
-        .eq("user_id", userId)
-        .eq("grupo", grupoSeleccionado);
-      setPadresGrupo((data || []).filter((p: any) => p.activo !== false));
+        .eq("user_id", userId);
+      const objetivo = normGrupo(grupoSeleccionado);
+      setPadresGrupo((data || []).filter((p: any) => p.activo !== false && normGrupo(p.grupo) === objetivo));
     };
     cargarPadres();
   }, [userId, grupoSeleccionado]);
@@ -856,7 +882,7 @@ function PadresView() {
 
   const filtered = padres.filter((p) => {
     const matchSearch = p.nombre.toLowerCase().includes(search.toLowerCase()) || p.nombre_hijo.toLowerCase().includes(search.toLowerCase()) || p.email.toLowerCase().includes(search.toLowerCase());
-    const matchGrupo = !grupoFilter || p.grupo === grupoFilter;
+    const matchGrupo = !grupoFilter || normGrupo(p.grupo) === normGrupo(grupoFilter);
     return matchSearch && matchGrupo;
   });
 
