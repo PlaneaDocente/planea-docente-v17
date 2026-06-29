@@ -138,6 +138,13 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
     toast.success(`Abriendo correo para ${emails.length} padre(s).`);
   };
 
+  const whatsappASeleccionados = () => {
+    const conTel = seleccionados.filter((p) => p.telefono);
+    if (conTel.length === 0) { toast.error("Los padres seleccionados no tienen teléfono."); return; }
+    conTel.forEach((p) => openWhatsApp(p.telefono, `Hola ${p.nombre}: ${cuerpo}`));
+    toast.success(`Abriendo WhatsApp para ${conTel.length} padre(s). Si el navegador bloquea ventanas, toca "permitir".`);
+  };
+
   return (
     <ModalWrapper title="Enviar a padres de familia" icon={Send} onClose={onClose}>
       <div className="space-y-3">
@@ -176,11 +183,16 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
             <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-2.5">
               <p className="text-[11px] text-blue-700 dark:text-blue-300">El <b>correo</b> se envía a todos los seleccionados de una vez (copia oculta). El <b>WhatsApp</b> se abre uno por uno (WhatsApp web no permite envío masivo).</p>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={onClose}>Cerrar</Button>
-              <Button className="flex-1 gap-2" onClick={correoASeleccionados} disabled={seleccionados.length === 0}>
-                <Mail className="w-4 h-4" /> Correo a seleccionados
-              </Button>
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <Button className="flex-1 gap-2 bg-green-600 hover:bg-green-700" onClick={whatsappASeleccionados} disabled={seleccionados.length === 0}>
+                  <Smartphone className="w-4 h-4" /> WhatsApp a seleccionados
+                </Button>
+                <Button className="flex-1 gap-2" onClick={correoASeleccionados} disabled={seleccionados.length === 0}>
+                  <Mail className="w-4 h-4" /> Correo a seleccionados
+                </Button>
+              </div>
+              <Button variant="outline" onClick={onClose}>Cerrar</Button>
             </div>
           </>
         )}
@@ -736,6 +748,16 @@ function MensajesView() {
               className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary resize-none"
             />
             <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" className="gap-2 text-green-700 border-green-300"
+                onClick={() => {
+                  if (!msgPadres.trim()) { toast.error("Escribe el mensaje primero."); return; }
+                  const conTel = padresGrupo.filter((p) => p.telefono);
+                  if (conTel.length === 0) { toast.error("Ningún padre del grupo tiene teléfono."); return; }
+                  conTel.forEach((p) => openWhatsApp(p.telefono, `Hola ${p.nombre}: ${msgPadres.trim()}`));
+                  toast.success(`Abriendo WhatsApp para ${conTel.length} padre(s). Permite las ventanas si el navegador las bloquea.`);
+                }}>
+                <Smartphone className="w-4 h-4" /> WhatsApp a todos ({padresGrupo.filter((p) => p.telefono).length})
+              </Button>
               <Button size="sm" variant="outline" className="gap-2"
                 onClick={() => {
                   if (!msgPadres.trim()) { toast.error("Escribe el mensaje primero."); return; }
@@ -1160,6 +1182,7 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
   const [mensaje, setMensaje] = useState("");
   const [tipo, setTipo] = useState<AvisoTipo>("aviso");
   const [grupo, setGrupo] = useState(GRUPOS[0]);
+  useEffect(() => { if (gruposReales.length > 0 && !gruposReales.includes(grupo)) setGrupo(gruposReales[0]); }, [gruposReales]); // grupo por defecto = primer grupo real
   const [saving, setSaving] = useState(false);
   const [, setAvisos] = useStoreItem(store.avisos);
 
@@ -1241,6 +1264,7 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
   const [descripcion, setDescripcion] = useState("");
   const [fechaEntrega, setFechaEntrega] = useState("");
   const [grupo, setGrupo] = useState(GRUPOS[0]);
+  useEffect(() => { if (gruposReales.length > 0 && !gruposReales.includes(grupo)) setGrupo(gruposReales[0]); }, [gruposReales]); // grupo por defecto = primer grupo real
   const [saving, setSaving] = useState(false);
   const [, setTareas] = useStoreItem(store.tareas);
 
@@ -1316,6 +1340,7 @@ function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
   const gruposReales = useGruposReales();
   const [texto, setTexto] = useState("");
   const [grupo, setGrupo] = useState(GRUPOS[0]);
+  useEffect(() => { if (gruposReales.length > 0 && !gruposReales.includes(grupo)) setGrupo(gruposReales[0]); }, [gruposReales]); // grupo por defecto = primer grupo real
   const [saving, setSaving] = useState(false);
   const [, setMensajes] = useStoreItem(store.mensajes);
 

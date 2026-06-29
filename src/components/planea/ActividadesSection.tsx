@@ -56,7 +56,7 @@ const NIVELES_DESEMPENO = [
   { value: "sobresaliente" as NivelDesempeño, label: "Sobresaliente", color: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200" },
 ];
 
-const GRUPOS = ["3°A", "3°B", "4°A", "4°B", "5°A", "5°B", "6°A", "6°B"];
+const GRUPOS = ["1°A","1°B","1°C","1°D","2°A","2°B","2°C","2°D","3°A","3°B","3°C","3°D","4°A","4°B","4°C","4°D","5°A","5°B","5°C","5°D","6°A","6°B","6°C","6°D"];
 
 const STORAGE_KEY = "pd_actividades_nem_v1";
 
