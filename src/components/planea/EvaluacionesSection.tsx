@@ -28,7 +28,14 @@ interface Evaluacion {
   created_at: string;
   campo_formativo?: string | null;
   estructura?: RubricaEstructura | null;
+  trimestre?: number | null;
 }
+
+const TRIMESTRES = [
+  { value: 1, label: "1er Trimestre" },
+  { value: 2, label: "2do Trimestre" },
+  { value: 3, label: "3er Trimestre" },
+];
 
 interface RubricaFila {
   indicador: string;
@@ -294,6 +301,8 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
   const [showForm, setShowForm] = useState(false);
   const [titulo, setTitulo] = useState("");
   const [materia, setMateria] = useState("Español");
+  const [campoFormativo, setCampoFormativo] = useState(CAMPOS_FORMATIVOS[0]);
+  const [trimestre, setTrimestre] = useState<number>(1);
   const [criterios, setCriterios] = useState<string[]>([""]);
 
   const cargar = useCallback(async () => {
@@ -322,7 +331,10 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
       materia,
       tipo,
       maestro_id: userId,    // 🔁 cambiado
+      user_id: userId,
       grupo,
+      campo_formativo: campoFormativo,
+      trimestre,
       criterios: criteriosLimpios,
       estado: "borrador",
     });
@@ -364,6 +376,14 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
             <select value={materia} onChange={e => setMateria(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
               <option>Matemáticas</option><option>Español</option><option>Ciencias Naturales</option><option>Historia</option>
             </select>
+            <div className="grid grid-cols-2 gap-2">
+              <select value={campoFormativo} onChange={e => setCampoFormativo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+                {CAMPOS_FORMATIVOS.map(c => <option key={c}>{c}</option>)}
+              </select>
+              <select value={trimestre} onChange={e => setTrimestre(Number(e.target.value))} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+                {TRIMESTRES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </div>
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">{tipo === "examen" ? "Preguntas" : tipo === "rubrica" ? "Criterios" : "Ítems"}</p>
               {criterios.map((c, i) => (
@@ -428,44 +448,39 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
   const [evaluaciones, setEvaluaciones] = useState<Evaluacion[]>([]);
   const [calificaciones, setCalificaciones] = useState<Record<string, Record<string, number>>>({});
   const [loading, setLoading] = useState(false);
+  const [trimestre, setTrimestre] = useState<number>(1);
 
   const cargar = useCallback(async () => {
     if (!grupo || !userId) return;
     setLoading(true);
     try {
-      // Alumnos del grupo
       const { data: alums } = await supabase
         .from("alumnos")
         .select("id, nombre, apellidos, grupo, activo")
-        .eq("user_id", userId)
-        .eq("grupo", grupo)
-        .eq("activo", true);
+        .eq("user_id", userId).eq("grupo", grupo).eq("activo", true)
+        .order("nombre", { ascending: true });
       setAlumnos((alums as AlumnoMini[]) || []);
 
-      // ✅ CORRECCIÓN: evaluaciones publicadas del grupo usando maestro_id
       const { data: evals } = await supabase
         .from("evaluaciones")
         .select("*")
-        .eq("maestro_id", userId)      // 🔁 cambiado
-        .eq("grupo", grupo)
-        .eq("estado", "publicado");
+        .eq("maestro_id", userId).eq("grupo", grupo).eq("estado", "publicado");
       const evalsData = (evals as Evaluacion[]) || [];
       setEvaluaciones(evalsData);
 
-      // Calificaciones existentes (la tabla calificaciones usa user_id, no cambia)
       if (evalsData.length > 0) {
         const evalIds = evalsData.map(e => e.id);
         const { data: cals } = await supabase
-          .from("calificaciones_nem")
-          .select("*")
-          .eq("user_id", userId)
-          .in("evaluacion_id", evalIds);
+          .from("calificaciones_nem").select("*")
+          .eq("user_id", userId).in("evaluacion_id", evalIds);
         const map: Record<string, Record<string, number>> = {};
         (cals as Calificacion[] || []).forEach(c => {
           if (!map[c.alumno_id]) map[c.alumno_id] = {};
           map[c.alumno_id][c.evaluacion_id] = Number(c.nota);
         });
         setCalificaciones(map);
+      } else {
+        setCalificaciones({});
       }
     } catch (err) {
       console.error("[Calificaciones] Error:", err);
@@ -476,69 +491,163 @@ function CalificacionesView({ grupo, userId }: { grupo: string; userId: string |
 
   useEffect(() => { cargar(); }, [cargar]);
 
-  const guardarNota = async (alumnoId: string, evalId: string, nota: string) => {
-    const num = parseFloat(nota);
+  const guardarNota = async (alumnoId: string, evalId: string, valor: string) => {
+    const num = parseFloat(valor);
     if (isNaN(num) || num < 0 || num > 10) return;
     if (!userId) return;
+    setCalificaciones(prev => ({ ...prev, [alumnoId]: { ...(prev[alumnoId] || {}), [evalId]: num } }));
     const { error } = await supabase.from("calificaciones_nem").upsert({
-      user_id: userId,
-      evaluacion_id: evalId,
-      alumno_id: alumnoId,
-      nota: num,
+      user_id: userId, evaluacion_id: evalId, alumno_id: alumnoId, nota: num,
     }, { onConflict: "user_id,evaluacion_id,alumno_id" });
     if (error) toast.error(error.message);
     else toast.success("Calificación guardada");
   };
 
+  const tipoIcono = (t: string) => t === "rubrica" ? "⭐" : t === "cotejo" ? "✅" : "📝";
+
+  // Evaluaciones del trimestre seleccionado
+  const evalsTrim = evaluaciones.filter(e => (e.trimestre || 1) === trimestre);
+  // Agrupar por campo formativo (las que no tengan, van a "Sin campo")
+  const camposOrden = [...CAMPOS_FORMATIVOS, "Otros"];
+  const grupos: { campo: string; evals: Evaluacion[] }[] = [];
+  for (const campo of camposOrden) {
+    const evs = evalsTrim.filter(e => (e.campo_formativo || "Otros") === campo);
+    if (evs.length > 0) grupos.push({ campo, evals: evs });
+  }
+
+  const promedioCampo = (alumnoId: string, evs: Evaluacion[]): number | null => {
+    const notas = evs.map(e => calificaciones[alumnoId]?.[e.id] || 0).filter(n => n > 0);
+    if (notas.length === 0) return null;
+    return notas.reduce((a, b) => a + b, 0) / notas.length;
+  };
+  const promedioGeneral = (alumnoId: string): number | null => {
+    const proms = grupos.map(g => promedioCampo(alumnoId, g.evals)).filter((p): p is number => p !== null);
+    if (proms.length === 0) return null;
+    return proms.reduce((a, b) => a + b, 0) / proms.length;
+  };
+  const colorNota = (n: number) => n >= 8 ? "text-emerald-600" : n >= 6 ? "text-amber-600" : "text-red-600";
+
+  const descargarPDF = () => {
+    const fecha = new Date().toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "numeric" });
+    const esc = (s: string) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const trimLabel = TRIMESTRES.find(t => t.value === trimestre)?.label || "";
+    let head1 = '<th rowspan="2">Alumno</th>';
+    let head2 = "";
+    grupos.forEach(g => {
+      head1 += `<th colspan="${g.evals.length + 1}">${esc(g.campo)}</th>`;
+      g.evals.forEach(e => { head2 += `<th>${tipoIcono(e.tipo)} ${esc(e.titulo)}</th>`; });
+      head2 += `<th><b>Prom</b></th>`;
+    });
+    head1 += '<th rowspan="2">General</th>';
+    const filas = alumnos.map(a => {
+      let row = `<td style="text-align:left">${esc(a.nombre)} ${esc(a.apellidos || "")}</td>`;
+      grupos.forEach(g => {
+        g.evals.forEach(e => { const n = calificaciones[a.id]?.[e.id] || 0; row += `<td>${n > 0 ? n.toFixed(1) : "—"}</td>`; });
+        const pc = promedioCampo(a.id, g.evals);
+        row += `<td><b>${pc !== null ? pc.toFixed(1) : "—"}</b></td>`;
+      });
+      const pg = promedioGeneral(a.id);
+      row += `<td><b>${pg !== null ? pg.toFixed(1) : "—"}</b></td>`;
+      return `<tr>${row}</tr>`;
+    }).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Calificaciones ${esc(grupo)} - ${esc(trimLabel)}</title>
+      <style>body{font-family:Arial,sans-serif;color:#111;padding:24px}h1{color:#2563eb;font-size:18px;margin:0 0 4px}
+      p{font-size:12px;color:#374151;margin:2px 0}table{border-collapse:collapse;width:100%;margin-top:10px;font-size:11px}
+      th,td{border:1px solid #cbd5e1;padding:4px 6px;text-align:center}th{background:#dbeafe;color:#1e3a8a}
+      td:first-child,th:first-child{text-align:left}.footer{margin-top:16px;font-size:10px;color:#9ca3af;text-align:right}
+      button,select,input{display:none !important}</style></head><body>
+      <h1>Calificaciones — ${esc(grupo)}</h1>
+      <p><b>${esc(trimLabel)}</b> · Generado: ${fecha} · PlaneaDocente.com (NEM)</p>
+      <table><thead><tr>${head1}</tr><tr>${head2}</tr></thead><tbody>${filas}</tbody></table>
+      <div class="footer">Calificación general = promedio de los campos formativos del trimestre.</div>
+      </body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) { toast.error("Permite las ventanas emergentes para el PDF."); return; }
+    w.document.write(html); w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 350);
+  };
+
   if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
   return (
-    <div className="bg-card rounded-2xl p-5 border border-border shadow-sm overflow-x-auto">
-      <div className="flex items-center justify-between mb-4">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-semibold flex items-center gap-2"><BarChart3 className="w-4 h-4 text-blue-500" /> Calificaciones del Grupo {grupo}</h3>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1 bg-muted rounded-xl p-1">
+            {TRIMESTRES.map(t => (
+              <button key={t.value} onClick={() => setTrimestre(t.value)}
+                className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${trimestre === t.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {grupos.length > 0 && alumnos.length > 0 && (
+            <Button size="sm" variant="outline" className="gap-2" onClick={descargarPDF}><Download className="w-4 h-4" /> PDF</Button>
+          )}
+        </div>
       </div>
-      {evaluaciones.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-8">No hay evaluaciones publicadas. Publica una rúbrica o examen primero.</p>
+
+      {evalsTrim.length === 0 ? (
+        <div className="bg-card rounded-2xl p-8 border border-border text-center">
+          <p className="text-sm text-muted-foreground">No hay evaluaciones publicadas en el {TRIMESTRES.find(t => t.value === trimestre)?.label}. Crea y publica rúbricas, listas de cotejo o exámenes y asígnalos a este trimestre.</p>
+        </div>
       ) : alumnos.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8">No hay alumnos activos en este grupo.</p>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="text-left py-2 px-3 text-xs font-semibold text-muted-foreground">Alumno</th>
-              {evaluaciones.map(e => (
-                <th key={e.id} className="text-center py-2 px-3 text-xs font-semibold text-muted-foreground min-w-[100px]">{e.titulo}</th>
-              ))}
-              <th className="text-center py-2 px-3 text-xs font-semibold text-muted-foreground">Prom</th>
-            </tr>
-          </thead>
-          <tbody>
-            {alumnos.map((a, idx) => {
-              const notas = evaluaciones.map(e => calificaciones[a.id]?.[e.id] || 0);
-              const notasValidas = notas.filter(n => n > 0);
-              const promedio = notasValidas.length > 0 ? (notasValidas.reduce((a, b) => a + b, 0) / notasValidas.length).toFixed(1) : "-";
-              return (
-                <tr key={a.id} className={`border-b border-border/50 ${idx % 2 === 0 ? "bg-muted/20" : ""}`}>
-                  <td className="py-2 px-3 font-medium">{a.nombre} {a.apellidos || ""}</td>
-                  {evaluaciones.map(e => (
-                    <td key={e.id} className="py-2 px-3 text-center">
-                      <input
-                        type="number" min="0" max="10" step="0.1"
-                        defaultValue={calificaciones[a.id]?.[e.id] || ""}
-                        onBlur={(ev) => guardarNota(a.id, e.id, ev.target.value)}
-                        className="w-16 bg-muted rounded-lg px-2 py-1 text-center text-sm outline-none border border-border"
-                      />
+        <div className="bg-card rounded-2xl border border-border shadow-sm overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr>
+                <th rowSpan={2} className="text-left p-2 border border-border bg-muted/60 sticky left-0 min-w-[150px]">Alumno</th>
+                {grupos.map(g => (
+                  <th key={g.campo} colSpan={g.evals.length + 1} className="p-2 border border-border bg-blue-50 dark:bg-blue-950/40 text-xs font-semibold text-blue-800 dark:text-blue-300">{g.campo}</th>
+                ))}
+                <th rowSpan={2} className="p-2 border border-border bg-amber-50 dark:bg-amber-950/40 text-xs font-bold min-w-[70px]">General</th>
+              </tr>
+              <tr>
+                {grupos.map(g => [
+                  ...g.evals.map(e => (
+                    <th key={e.id} className="p-2 border border-border bg-muted/40 text-[11px] font-medium min-w-[80px]" title={e.titulo}>
+                      {tipoIcono(e.tipo)} {e.titulo.length > 16 ? e.titulo.slice(0, 16) + "…" : e.titulo}
+                    </th>
+                  )),
+                  <th key={g.campo + "-prom"} className="p-2 border border-border bg-blue-50/60 dark:bg-blue-950/30 text-[11px] font-bold min-w-[60px]">Prom</th>,
+                ])}
+              </tr>
+            </thead>
+            <tbody>
+              {alumnos.map((a, idx) => {
+                const pg = promedioGeneral(a.id);
+                return (
+                  <tr key={a.id} className={idx % 2 === 0 ? "bg-muted/10" : ""}>
+                    <td className="p-2 border border-border font-medium sticky left-0 bg-card">{a.nombre} {a.apellidos || ""}</td>
+                    {grupos.map(g => [
+                      ...g.evals.map(e => (
+                        <td key={e.id} className="p-1 border border-border text-center">
+                          <input type="number" min="0" max="10" step="0.1"
+                            defaultValue={calificaciones[a.id]?.[e.id] || ""}
+                            onBlur={(ev) => guardarNota(a.id, e.id, ev.target.value)}
+                            className="w-14 bg-muted rounded-lg px-1.5 py-1 text-center text-xs outline-none border border-border" />
+                        </td>
+                      )),
+                      (() => { const pc = promedioCampo(a.id, g.evals); return (
+                        <td key={g.campo + "-pc"} className={`p-2 border border-border text-center font-bold ${pc !== null ? colorNota(pc) : "text-muted-foreground"}`}>
+                          {pc !== null ? pc.toFixed(1) : "—"}
+                        </td>
+                      ); })(),
+                    ])}
+                    <td className={`p-2 border border-border text-center font-bold text-base ${pg !== null ? colorNota(pg) : "text-muted-foreground"}`}>
+                      {pg !== null ? pg.toFixed(1) : "—"}
                     </td>
-                  ))}
-                  <td className={`py-2 px-3 text-center font-bold ${Number(promedio) >= 8 ? "text-emerald-600" : Number(promedio) >= 6 ? "text-amber-600" : "text-red-600"}`}>
-                    {promedio}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
+      <p className="text-[11px] text-muted-foreground">La <b>calificación general</b> es el promedio de los campos formativos del trimestre. Puedes escribir o ajustar cualquier nota directamente (0 a 10).</p>
     </div>
   );
 }
@@ -673,6 +782,7 @@ function RubricaBuilder({ grupo, userId, editing, onClose, onSaved }: {
   const [campoFormativo, setCampoFormativo] = useState(editing?.campo_formativo || est0?.campo_formativo || CAMPOS_FORMATIVOS[0]);
   const [titulo, setTitulo] = useState(editing?.titulo || "");
   const [materia, setMateria] = useState(editing?.materia || "Español");
+  const [trimestre, setTrimestre] = useState<number>(editing?.trimestre || 1);
   const [niveles, setNiveles] = useState<string[]>(est0?.niveles?.length ? est0.niveles : [...NIVELES_DEFAULT]);
   const [filas, setFilas] = useState<RubricaFila[]>(
     est0?.filas?.length
@@ -724,6 +834,7 @@ function RubricaBuilder({ grupo, userId, editing, onClose, onSaved }: {
       user_id: userId,
       grupo,
       campo_formativo: campoFormativo,
+      trimestre,
       criterios: filasLimpias.map(f => f.indicador),
       estructura,
     };
@@ -766,6 +877,13 @@ function RubricaBuilder({ grupo, userId, editing, onClose, onSaved }: {
             <option>Matemáticas</option><option>Español</option><option>Ciencias Naturales</option><option>Historia</option><option>Geografía</option><option>Formación Cívica</option>
           </select>
         </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-muted-foreground mb-1 block">Trimestre</label>
+        <select value={trimestre} onChange={e => setTrimestre(Number(e.target.value))} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+          {TRIMESTRES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
       </div>
 
       <div>
@@ -1203,6 +1321,7 @@ function CotejoBuilder({ grupo, userId, editing, onClose, onSaved }: {
   const est0 = editing?.estructura || null;
   const [campoFormativo, setCampoFormativo] = useState(editing?.campo_formativo || est0?.campo_formativo || CAMPOS_FORMATIVOS[0]);
   const [titulo, setTitulo] = useState(editing?.titulo || "");
+  const [trimestre, setTrimestre] = useState<number>(editing?.trimestre || 1);
   const [escala, setEscala] = useState<string[]>(est0?.niveles?.length ? est0.niveles : ESCALAS_COTEJO[0]);
   const [indicadores, setIndicadores] = useState<string[]>(
     est0?.filas?.length ? est0.filas.map(f => f.indicador) : [""]
@@ -1227,6 +1346,7 @@ function CotejoBuilder({ grupo, userId, editing, onClose, onSaved }: {
     const payload = {
       titulo: titulo.trim(), materia: campoFormativo, tipo: "cotejo" as const,
       maestro_id: userId, user_id: userId, grupo, campo_formativo: campoFormativo,
+      trimestre,
       criterios: inds, estructura,
     };
     setSaving(true);
@@ -1264,6 +1384,13 @@ function CotejoBuilder({ grupo, userId, editing, onClose, onSaved }: {
             {ESCALAS_COTEJO.map((s, i) => <option key={i} value={JSON.stringify(s)}>{s.join(" / ")}</option>)}
           </select>
         </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-muted-foreground mb-1 block">Trimestre</label>
+        <select value={trimestre} onChange={e => setTrimestre(Number(e.target.value))} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+          {TRIMESTRES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
       </div>
 
       <div>
