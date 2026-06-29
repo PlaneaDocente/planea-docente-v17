@@ -179,6 +179,21 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
   );
 }
 
+function useGruposReales(): string[] {
+  const userId = useAuthUser();
+  const [grupos, setGrupos] = useState<string[]>(GRUPOS);
+  useEffect(() => {
+    if (!userId) return;
+    supabase.from("alumnos").select("grupo").eq("user_id", userId).eq("activo", true)
+      .then(({ data }) => {
+        const set = Array.from(new Set((data || []).map((a: any) => (a.grupo || "").trim()).filter(Boolean)))
+          .sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+        if (set.length > 0) setGrupos(set as string[]);
+      });
+  }, [userId]);
+  return grupos;
+}
+
 /* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
 
 export default function PadresSection() {
@@ -250,6 +265,7 @@ export default function PadresSection() {
 
 function AvisosView() {
   const userId = useAuthUser();
+  const gruposReales = useGruposReales();
   const [avisos, setAvisos] = useStoreItem(store.avisos);
   const [search, setSearch] = useState("");
   const [grupoFilter, setGrupoFilter] = useState("");
@@ -347,7 +363,7 @@ function AvisosView() {
         </div>
         <select value={grupoFilter} onChange={(e) => setGrupoFilter(e.target.value)} className="bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary">
           <option value="">Todos los grupos</option>
-          {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+          {gruposReales.map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
       </div>
 
@@ -540,8 +556,15 @@ function TareasDigitalesView() {
 
 function MensajesView() {
   const userId = useAuthUser();
+  const gruposReales = useGruposReales();
   const [mensajes, setMensajes] = useStoreItem(store.mensajes);
   const [grupoSeleccionado, setGrupoSeleccionado] = useState("3°A");
+
+  useEffect(() => {
+    if (gruposReales.length > 0 && !gruposReales.includes(grupoSeleccionado)) {
+      setGrupoSeleccionado(gruposReales[0]);
+    }
+  }, [gruposReales, grupoSeleccionado]);
   const [newMsg, setNewMsg] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -658,7 +681,7 @@ function MensajesView() {
         <div className="bg-card rounded-xl p-3 border border-border flex items-center gap-3">
           <Hash className="w-4 h-4 text-muted-foreground" />
           <select value={grupoSeleccionado} onChange={(e) => setGrupoSeleccionado(e.target.value)} className="bg-transparent text-sm font-medium outline-none">
-            {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+            {gruposReales.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
           {noLeidos > 0 && <Badge variant="destructive" className="text-xs">{noLeidos} nuevo{noLeidos > 1 ? "s" : ""}</Badge>}
         </div>
@@ -804,6 +827,7 @@ function MensajesView() {
 
 function PadresView() {
   const userId = useAuthUser();
+  const gruposReales = useGruposReales();
   const [padres, setPadres] = useStoreItem(store.padres);
   const [search, setSearch] = useState("");
   const [grupoFilter, setGrupoFilter] = useState("");
@@ -896,7 +920,7 @@ function PadresView() {
         </div>
         <select value={grupoFilter} onChange={(e) => setGrupoFilter(e.target.value)} className="bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary">
           <option value="">Todos los grupos</option>
-          {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+          {gruposReales.map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
       </div>
 
@@ -1105,6 +1129,7 @@ function ModalWrapper({ title, icon: Icon, children, onClose }: { title: string;
 
 function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
   const userId = useAuthUser();
+  const gruposReales = useGruposReales();
   const [titulo, setTitulo] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [tipo, setTipo] = useState<AvisoTipo>("aviso");
@@ -1164,7 +1189,7 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grupo</label>
             <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-              {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+              {gruposReales.map((g) => <option key={g} value={g}>{g}</option>)}
             </select>
           </div>
         </div>
@@ -1184,6 +1209,7 @@ function NuevoAvisoModal({ onClose }: { onClose: () => void }) {
 
 function NuevaTareaModal({ onClose }: { onClose: () => void }) {
   const userId = useAuthUser();
+  const gruposReales = useGruposReales();
   const [titulo, setTitulo] = useState("");
   const [materia, setMateria] = useState("");
   const [descripcion, setDescripcion] = useState("");
@@ -1242,7 +1268,7 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grupo</label>
           <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-            {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+            {gruposReales.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
         <div className="flex gap-3 pt-2">
@@ -1261,6 +1287,7 @@ function NuevaTareaModal({ onClose }: { onClose: () => void }) {
 
 function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
   const userId = useAuthUser();
+  const gruposReales = useGruposReales();
   const [texto, setTexto] = useState("");
   const [grupo, setGrupo] = useState(GRUPOS[0]);
   const [saving, setSaving] = useState(false);
@@ -1296,7 +1323,7 @@ function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grupo</label>
           <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-            {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+            {gruposReales.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
         <div>
@@ -1319,6 +1346,7 @@ function NuevoMensajeModal({ onClose }: { onClose: () => void }) {
 
 function NuevoPadreModal({ onClose }: { onClose: () => void }) {
   const userId = useAuthUser();
+  const gruposReales = useGruposReales();
   const [nombre, setNombre] = useState("");
   const [telefono, setTelefono] = useState("");
   const [email, setEmail] = useState("");
@@ -1427,7 +1455,7 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grupo</label>
           <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-            {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+            {gruposReales.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
         <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-3">
