@@ -74,7 +74,24 @@ function openWhatsApp(phone: string, message: string) {
 function openEmail(email: string, subject: string, body: string) {
   if (!email || !email.includes("@")) { toast.error("Email inválido"); return; }
   const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  window.open(url, "_blank");
+  const a = document.createElement("a");
+  a.href = url;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function openEmailMultiple(emails: string[], subject: string, body: string) {
+  const validos = emails.filter((e) => e && e.includes("@"));
+  if (validos.length === 0) { toast.error("No hay correos válidos entre los padres."); return; }
+  const url = `mailto:?bcc=${encodeURIComponent(validos.join(","))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 /* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
@@ -426,6 +443,7 @@ function MensajesView() {
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [padresGrupo, setPadresGrupo] = useState<any[]>([]);
+  const [msgPadres, setMsgPadres] = useState("");
 
   useEffect(() => {
     const cargarPadres = async () => {
@@ -546,45 +564,64 @@ function MensajesView() {
       </div>
 
       {/* Enviar el mensaje a los padres registrados del grupo */}
-      <div className="bg-card rounded-2xl border border-border p-4">
-        <p className="text-xs font-medium text-muted-foreground mb-2">
-          Enviar a los padres registrados de {grupoSeleccionado} (escribe el mensaje abajo y elige cómo enviarlo a cada uno)
+      <div className="bg-card rounded-2xl border border-border p-4 space-y-3">
+        <p className="text-sm font-semibold flex items-center gap-2">
+          <Send className="w-4 h-4 text-cyan-500" /> Enviar a padres de {grupoSeleccionado}
         </p>
         {padresGrupo.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             No hay padres registrados en este grupo. Agrégalos en la pestaña <span className="font-medium">Padres de Familia</span> para poder enviarles mensajes.
           </p>
         ) : (
-          <div className="grid sm:grid-cols-2 gap-2">
-            {padresGrupo.map((p) => (
-              <div key={p.id} className="flex items-center justify-between gap-2 bg-muted/40 rounded-xl px-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{p.nombre}</p>
-                  {p.nombre_hijo && <p className="text-[11px] text-muted-foreground truncate">Hijo/a: {p.nombre_hijo}</p>}
+          <>
+            <textarea
+              value={msgPadres}
+              onChange={(e) => setMsgPadres(e.target.value)}
+              placeholder="Escribe aquí el mensaje para los padres…"
+              rows={3}
+              className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary resize-none"
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" className="gap-2"
+                onClick={() => {
+                  if (!msgPadres.trim()) { toast.error("Escribe el mensaje primero."); return; }
+                  openEmailMultiple(padresGrupo.map((p) => p.email), `Mensaje del maestro — ${grupoSeleccionado}`, msgPadres.trim());
+                }}>
+                <Mail className="w-4 h-4" /> Correo a todos ({padresGrupo.filter((p) => p.email).length})
+              </Button>
+              <span className="text-[11px] text-muted-foreground self-center">· o envía individual abajo (WhatsApp es uno por uno)</span>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {padresGrupo.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-2 bg-muted/40 rounded-xl px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{p.nombre}</p>
+                    {p.nombre_hijo && <p className="text-[11px] text-muted-foreground truncate">Hijo/a: {p.nombre_hijo}</p>}
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <button
+                      onClick={() => {
+                        if (!msgPadres.trim()) { toast.error("Escribe el mensaje primero."); return; }
+                        if (!p.telefono) { toast.error("Este padre no tiene teléfono."); return; }
+                        openWhatsApp(p.telefono, `Hola ${p.nombre}: ${msgPadres.trim()}`);
+                      }}
+                      className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-green-600 hover:bg-green-50" title="Enviar por WhatsApp">
+                      <Smartphone className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!msgPadres.trim()) { toast.error("Escribe el mensaje primero."); return; }
+                        if (!p.email) { toast.error("Este padre no tiene correo."); return; }
+                        openEmail(p.email, `Mensaje del maestro — ${grupoSeleccionado}`, `Estimado/a ${p.nombre}:\n\n${msgPadres.trim()}`);
+                      }}
+                      className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-blue-600 hover:bg-blue-50" title="Enviar por correo">
+                      <Mail className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <button
-                    onClick={() => {
-                      if (!newMsg.trim()) { toast.error("Escribe primero el mensaje abajo."); return; }
-                      if (!p.telefono) { toast.error("Este padre no tiene teléfono."); return; }
-                      openWhatsApp(p.telefono, `Hola ${p.nombre}: ${newMsg.trim()}`);
-                    }}
-                    className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-green-600 hover:bg-green-50" title="Enviar por WhatsApp">
-                    <Smartphone className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (!newMsg.trim()) { toast.error("Escribe primero el mensaje abajo."); return; }
-                      if (!p.email) { toast.error("Este padre no tiene correo."); return; }
-                      openEmail(p.email, `Mensaje del maestro — ${grupoSeleccionado}`, `Estimado/a ${p.nombre}:\n\n${newMsg.trim()}`);
-                    }}
-                    className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-blue-600 hover:bg-blue-50" title="Enviar por correo">
-                    <Mail className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -833,7 +870,14 @@ function EditarPadreModal({ padre, onClose, onSaved }: { padre: Padre; onClose: 
   const [alumnoId, setAlumnoId] = useState(padre.alumno_id || "");
   const [nombreHijo, setNombreHijo] = useState(padre.nombre_hijo || "");
   const [saving, setSaving] = useState(false);
-  const [alumnos] = useStoreItem(store.alumnos);
+  const [alumnos, setAlumnos] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!userId) return;
+    supabase.from("alumnos").select("id, nombre, grupo, activo")
+      .eq("user_id", userId).eq("activo", true).order("nombre", { ascending: true })
+      .then(({ data }) => setAlumnos(data || []));
+  }, [userId]);
 
   const handleUpdate = async () => {
     if (!nombre.trim() || !alumnoId) { toast.error("El nombre del padre/madre y el alumno vinculado son obligatorios."); return; }
@@ -1160,8 +1204,15 @@ function NuevoPadreModal({ onClose }: { onClose: () => void }) {
   const [nombreHijo, setNombreHijo] = useState("");
   const [alumnoId, setAlumnoId] = useState("");
   const [saving, setSaving] = useState(false);
-  const [alumnos] = useStoreItem(store.alumnos);
+  const [alumnos, setAlumnos] = useState<any[]>([]);
   const [, setPadres] = useStoreItem(store.padres);
+
+  useEffect(() => {
+    if (!userId) return;
+    supabase.from("alumnos").select("id, nombre, grupo, activo")
+      .eq("user_id", userId).eq("activo", true).order("nombre", { ascending: true })
+      .then(({ data }) => setAlumnos(data || []));
+  }, [userId]);
 
   const handleSave = async () => {
     if (!nombre.trim() || !alumnoId) { toast.error("El nombre del padre/madre y el alumno vinculado son obligatorios."); return; }
