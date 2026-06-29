@@ -94,6 +94,91 @@ function openEmailMultiple(emails: string[], subject: string, body: string) {
   document.body.removeChild(a);
 }
 
+function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
+  grupo: string; asunto: string; cuerpo: string; userId: string | null; onClose: () => void;
+}) {
+  const [padres, setPadres] = useState<any[]>([]);
+  const [sel, setSel] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      if (!userId) { setLoading(false); return; }
+      const { data } = await supabase.from("padres")
+        .select("id, nombre, telefono, email, nombre_hijo, activo")
+        .eq("user_id", userId).eq("grupo", grupo);
+      const activos = (data || []).filter((p: any) => p.activo !== false);
+      setPadres(activos);
+      const all: Record<string, boolean> = {};
+      activos.forEach((p: any) => { all[p.id] = true; });
+      setSel(all);
+      setLoading(false);
+    };
+    load();
+  }, [userId, grupo]);
+
+  const seleccionados = padres.filter((p) => sel[p.id]);
+  const todosSel = padres.length > 0 && seleccionados.length === padres.length;
+  const toggle = (id: string) => setSel((s) => ({ ...s, [id]: !s[id] }));
+  const toggleTodos = () => {
+    const v = !todosSel;
+    const n: Record<string, boolean> = {};
+    padres.forEach((p) => { n[p.id] = v; });
+    setSel(n);
+  };
+
+  const correoASeleccionados = () => {
+    const emails = seleccionados.map((p) => p.email).filter(Boolean);
+    if (emails.length === 0) { toast.error("Los padres seleccionados no tienen correo."); return; }
+    openEmailMultiple(emails, asunto, cuerpo);
+    toast.success(`Abriendo correo para ${emails.length} padre(s).`);
+  };
+
+  return (
+    <ModalWrapper title="Enviar a padres de familia" icon={Send} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="text-xs text-muted-foreground">Grupo <b>{grupo}</b>{asunto ? <> · asunto: <b>{asunto}</b></> : null}</div>
+        {loading ? (
+          <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+        ) : padres.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No hay padres activos registrados en {grupo}. Agrégalos en la pestaña Padres de Familia.</p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between">
+              <button onClick={toggleTodos} className="text-xs font-medium text-primary">{todosSel ? "Quitar todos" : "Seleccionar todos"}</button>
+              <span className="text-xs text-muted-foreground">{seleccionados.length} de {padres.length} seleccionados</span>
+            </div>
+            <div className="max-h-60 overflow-y-auto space-y-1 border border-border rounded-xl p-2">
+              {padres.map((p) => (
+                <div key={p.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50">
+                  <input type="checkbox" checked={!!sel[p.id]} onChange={() => toggle(p.id)} className="w-4 h-4 accent-primary" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{p.nombre}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {p.nombre_hijo ? `Hijo/a: ${p.nombre_hijo} · ` : ""}{p.telefono || "sin tel"} · {p.email || "sin correo"}
+                    </p>
+                  </div>
+                  <button onClick={() => p.telefono ? openWhatsApp(p.telefono, cuerpo) : toast.error("Sin teléfono")} className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-green-600 hover:bg-green-50" title="WhatsApp a este padre"><Smartphone className="w-4 h-4" /></button>
+                  <button onClick={() => p.email ? openEmail(p.email, asunto, cuerpo) : toast.error("Sin correo")} className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-blue-600 hover:bg-blue-50" title="Correo a este padre"><Mail className="w-4 h-4" /></button>
+                </div>
+              ))}
+            </div>
+            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-2.5">
+              <p className="text-[11px] text-blue-700 dark:text-blue-300">El <b>correo</b> se envía a todos los seleccionados de una vez (copia oculta). El <b>WhatsApp</b> se abre uno por uno (WhatsApp web no permite envío masivo).</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={onClose}>Cerrar</Button>
+              <Button className="flex-1 gap-2" onClick={correoASeleccionados} disabled={seleccionados.length === 0}>
+                <Mail className="w-4 h-4" /> Correo a seleccionados
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </ModalWrapper>
+  );
+}
+
 /* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
 
 export default function PadresSection() {
@@ -169,6 +254,7 @@ function AvisosView() {
   const [search, setSearch] = useState("");
   const [grupoFilter, setGrupoFilter] = useState("");
   const [loading, setLoading] = useState(true);
+  const [enviarAviso, setEnviarAviso] = useState<Aviso | null>(null);
 
   // Cargar desde Supabase
   useEffect(() => {
@@ -293,11 +379,8 @@ function AvisosView() {
                     <span>{a.leidos}/{a.total} leídos</span>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => handleSendWhatsApp(a)} className={`p-1.5 rounded-lg transition-colors ${a.enviado_whatsapp ? "bg-emerald-100 text-emerald-600" : "bg-muted text-muted-foreground hover:text-green-600 hover:bg-green-50"}`} title="Enviar por WhatsApp">
-                      <Smartphone className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => handleSendEmail(a)} className={`p-1.5 rounded-lg transition-colors ${a.enviado_email ? "bg-emerald-100 text-emerald-600" : "bg-muted text-muted-foreground hover:text-blue-600 hover:bg-blue-50"}`} title="Enviar por Email">
-                      <Mail className="w-3.5 h-3.5" />
+                    <button onClick={() => setEnviarAviso(a)} className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Enviar a padres del grupo">
+                      <Send className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => handleDelete(a.id)} className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors" title="Eliminar">
                       <Trash2 className="w-3.5 h-3.5" />
@@ -312,6 +395,16 @@ function AvisosView() {
           );
         })}
       </div>
+
+      {enviarAviso && (
+        <EnviarAPadresModal
+          grupo={enviarAviso.grupo}
+          asunto={`📢 ${enviarAviso.titulo}`}
+          cuerpo={`${enviarAviso.titulo}\n\n${enviarAviso.mensaje}\n\nFecha: ${formatDate(enviarAviso.fecha)}\nEnviado desde PlaneaDocente`}
+          userId={userId}
+          onClose={() => setEnviarAviso(null)}
+        />
+      )}
     </div>
   );
 }
@@ -323,6 +416,7 @@ function TareasDigitalesView() {
   const [tareas, setTareas] = useStoreItem(store.tareas);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [enviarTarea, setEnviarTarea] = useState<TareaDigital | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -412,8 +506,8 @@ function TareasDigitalesView() {
                     <p className="text-xs text-muted-foreground">enviadas</p>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => handleSendWhatsApp(t)} className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-green-600 hover:bg-green-50 transition-colors" title="Enviar por WhatsApp">
-                      <Smartphone className="w-3.5 h-3.5" />
+                    <button onClick={() => setEnviarTarea(t)} className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" title="Enviar a padres del grupo">
+                      <Send className="w-3.5 h-3.5" />
                     </button>
                     <button onClick={() => handleDelete(t.id)} className="p-1.5 rounded-lg bg-muted text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors" title="Eliminar">
                       <Trash2 className="w-3.5 h-3.5" />
@@ -428,6 +522,16 @@ function TareasDigitalesView() {
           );
         })}
       </div>
+
+      {enviarTarea && (
+        <EnviarAPadresModal
+          grupo={enviarTarea.grupo}
+          asunto={`📚 Nueva tarea: ${enviarTarea.titulo}`}
+          cuerpo={`📚 Nueva tarea: ${enviarTarea.titulo}\n\nMateria: ${enviarTarea.materia}\n${enviarTarea.descripcion}\n\n📅 Entrega: ${formatDate(enviarTarea.fecha_entrega)}\nEnviado desde PlaneaDocente`}
+          userId={userId}
+          onClose={() => setEnviarTarea(null)}
+        />
+      )}
     </div>
   );
 }
@@ -444,6 +548,7 @@ function MensajesView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [padresGrupo, setPadresGrupo] = useState<any[]>([]);
   const [msgPadres, setMsgPadres] = useState("");
+  const [selectorAbierto, setSelectorAbierto] = useState(false);
 
   useEffect(() => {
     const cargarPadres = async () => {
@@ -589,6 +694,13 @@ function MensajesView() {
                 }}>
                 <Mail className="w-4 h-4" /> Correo a todos ({padresGrupo.filter((p) => p.email).length})
               </Button>
+              <Button size="sm" variant="outline" className="gap-2"
+                onClick={() => {
+                  if (!msgPadres.trim()) { toast.error("Escribe el mensaje primero."); return; }
+                  setSelectorAbierto(true);
+                }}>
+                <Users className="w-4 h-4" /> Elegir destinatarios…
+              </Button>
               <span className="text-[11px] text-muted-foreground self-center">· o envía individual abajo (WhatsApp es uno por uno)</span>
             </div>
             <div className="grid sm:grid-cols-2 gap-2">
@@ -674,6 +786,16 @@ function MensajesView() {
           </div>
         </div>
       </div>
+
+      {selectorAbierto && (
+        <EnviarAPadresModal
+          grupo={grupoSeleccionado}
+          asunto={`Mensaje del maestro — ${grupoSeleccionado}`}
+          cuerpo={msgPadres.trim()}
+          userId={userId}
+          onClose={() => setSelectorAbierto(false)}
+        />
+      )}
     </div>
   );
 }
