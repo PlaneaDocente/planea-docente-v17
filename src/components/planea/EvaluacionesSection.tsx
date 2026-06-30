@@ -328,7 +328,7 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
     // ✅ CORRECCIÓN: insertar con maestro_id en lugar de user_id
     const { error } = await supabase.from("evaluaciones").insert({
       titulo: titulo.trim(),
-      materia,
+      materia: campoFormativo,
       tipo,
       maestro_id: userId,    // 🔁 cambiado
       user_id: userId,
@@ -413,16 +413,19 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
         {showForm && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="bg-card rounded-2xl p-5 border border-border space-y-3">
             <input value={titulo} onChange={e => setTitulo(e.target.value)} placeholder="Título..." className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border" />
-            <select value={materia} onChange={e => setMateria(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
-              <option>Matemáticas</option><option>Español</option><option>Ciencias Naturales</option><option>Historia</option>
-            </select>
             <div className="grid grid-cols-2 gap-2">
-              <select value={campoFormativo} onChange={e => setCampoFormativo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
-                {CAMPOS_FORMATIVOS.map(c => <option key={c}>{c}</option>)}
-              </select>
-              <select value={trimestre} onChange={e => setTrimestre(Number(e.target.value))} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
-                {TRIMESTRES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Campo formativo (NEM)</label>
+                <select value={campoFormativo} onChange={e => setCampoFormativo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+                  {CAMPOS_FORMATIVOS.map(c => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Trimestre</label>
+                <select value={trimestre} onChange={e => setTrimestre(Number(e.target.value))} className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border">
+                  {TRIMESTRES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
             </div>
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">{tipo === "examen" ? "Preguntas" : tipo === "rubrica" ? "Criterios" : "Ítems"}</p>
@@ -1219,13 +1222,19 @@ function EvaluarAlumnosModal({ evaluacion, grupo, userId, onClose }: {
                     return (
                       <tr key={a.id} className={idx % 2 === 0 ? "bg-muted/10" : ""}>
                         <td className="p-2 border-b border-border sticky left-0 bg-card font-medium">{a.nombre} {a.apellidos || ""}</td>
-                        {filas.map((_, fi) => (
+                        {filas.map((fila, fi) => (
                           <td key={fi} className="p-1 border-b border-l border-border">
                             <select value={arr[fi] || ""} onChange={e => setCelda(a.id, fi, e.target.value)}
                               className="w-full bg-muted rounded-lg px-2 py-1.5 text-xs outline-none border border-border">
                               <option value="">—</option>
-                              {niveles.map((n, ni) => <option key={ni} value={n}>{n}</option>)}
+                              {niveles.map((n, ni) => {
+                                const desc = fila?.descriptores?.[ni];
+                                return <option key={ni} value={n} title={desc || n}>{desc ? `${n} — ${desc}` : n}</option>;
+                              })}
                             </select>
+                            {arr[fi] && !esCotejo && fila?.descriptores?.[niveles.indexOf(arr[fi])] && (
+                              <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{fila.descriptores[niveles.indexOf(arr[fi])]}</p>
+                            )}
                           </td>
                         ))}
                         <td className="p-2 border-b border-l border-border text-center font-semibold">
