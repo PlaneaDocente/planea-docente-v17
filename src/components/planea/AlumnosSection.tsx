@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useMisGrupos } from "./useMisGrupos";
 
 /* ═════════════════════ TIPOS ═════════════════════ */
 
@@ -141,6 +142,7 @@ export default function AlumnosSection() {
 /* ═════════════════════ REGISTRO (CRUD SUPABASE) ═════════════════════ */
 
 function RegistroView() {
+  const misGrupos = useMisGrupos();
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -245,7 +247,7 @@ function RegistroView() {
           className="bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary"
         >
           <option value="">Todos los grupos</option>
-          {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+          {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
         <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
           <Plus className="w-4 h-4" /> Nuevo Alumno
@@ -308,6 +310,7 @@ function RegistroView() {
 
 function NuevoAlumnoModal({ onClose, userId, defaultGrupo }: { onClose: () => void; userId: string | null; defaultGrupo?: string }) {
   const grupoInicial = defaultGrupo || GRUPOS[0];
+  const misGrupos = useMisGrupos();
   const [nombre, setNombre] = useState("");
   const [apellidos, setApellidos] = useState("");
   const [grupo, setGrupo] = useState(grupoInicial);
@@ -367,7 +370,7 @@ function NuevoAlumnoModal({ onClose, userId, defaultGrupo }: { onClose: () => vo
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grupo</label>
             <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
-              {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+              {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
             </select>
           </div>
           <div>

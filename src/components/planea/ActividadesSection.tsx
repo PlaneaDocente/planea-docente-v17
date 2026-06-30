@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useMisGrupos } from "./useMisGrupos";
 import { motion, AnimatePresence } from "framer-motion";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -499,6 +500,7 @@ function ModalForm({
   onSave: (data: Omit<Actividad, "id" | "creado_en">) => void;
   onClose: () => void;
 }) {
+  const misGrupos = useMisGrupos();
   const [form, setForm] = useState<Omit<Actividad, "id" | "creado_en">>(() => ({
     titulo: initialData?.titulo ?? "",
     tipo: initialData?.tipo ?? "tarea",
@@ -568,7 +570,7 @@ function ModalForm({
             onChange={(e) => handleChange("grupo", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-border bg-card text-sm disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           >
-            {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+            {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
 

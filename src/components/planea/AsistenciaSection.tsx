@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useMisGrupos } from "./useMisGrupos";
 
 /* ═════════════════════ TIPOS ═════════════════════ */
 
@@ -143,6 +144,8 @@ function RegistroDiarioView() {
   const [loading, setLoading] = useState(true);
   const [fecha, setFecha] = useState(new Date().toISOString().split("T")[0]);
   const [grupo, setGrupo] = useState(GRUPOS[0]);
+  const misGrupos = useMisGrupos();
+  useEffect(() => { if (misGrupos.length > 0) setGrupo((g) => misGrupos.includes(g) ? g : misGrupos[0]); }, [misGrupos]);
   const [saving, setSaving] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -276,7 +279,7 @@ function RegistroDiarioView() {
           <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="bg-transparent text-sm outline-none" />
         </div>
         <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="bg-card border border-border rounded-xl px-3 py-2 text-sm outline-none">
-          {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+          {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
         <Button size="sm" className="gap-2 ml-auto" onClick={handleSave} disabled={saving}>
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -537,6 +540,8 @@ function ReportesView() {
   const [asistencias, setAsistencias] = useState<AsistenciaDia[]>([]);
   const [loading, setLoading] = useState(true);
   const [grupo, setGrupo] = useState(GRUPOS[0]);
+  const misGrupos = useMisGrupos();
+  useEffect(() => { if (misGrupos.length > 0) setGrupo((g) => misGrupos.includes(g) ? g : misGrupos[0]); }, [misGrupos]);
 
   const loadData = useCallback(async () => {
     try {
@@ -599,7 +604,7 @@ function ReportesView() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="bg-card border border-border rounded-xl px-3 py-2 text-sm outline-none">
-          {GRUPOS.map((g) => <option key={g} value={g}>{g}</option>)}
+          {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
       </div>
 

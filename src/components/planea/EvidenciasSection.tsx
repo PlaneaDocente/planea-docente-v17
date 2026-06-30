@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useMisGrupos } from "./useMisGrupos";
 
 /* ═════════════════════ TIPOS ═════════════════════ */
 
@@ -69,6 +70,13 @@ export default function EvidenciasSection() {
   const [activeTab, setActiveTab] = useState<TabId>("fotos");
   const [gruposDisponibles, setGruposDisponibles] = useState<string[]>(["1°A","1°B","1°C","1°D","2°A","2°B","2°C","2°D","3°A","3°B","3°C","3°D","4°A","4°B","4°C","4°D","5°A","5°B","5°C","5°D","6°A","6°B","6°C","6°D"]);
   const [grupoSeleccionado, setGrupoSeleccionado] = useState<string>("3°A");
+  const misGrupos = useMisGrupos();
+  useEffect(() => {
+    if (misGrupos.length > 0) {
+      setGruposDisponibles(misGrupos);
+      setGrupoSeleccionado((g) => misGrupos.includes(g) ? g : misGrupos[0]);
+    }
+  }, [misGrupos]);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [alumnosGrupo, setAlumnosGrupo] = useState<{ id: string; nombre: string }[]>([]);

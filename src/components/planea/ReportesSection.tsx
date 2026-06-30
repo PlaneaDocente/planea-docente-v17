@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
+import { useMisGrupos } from "./useMisGrupos";
 import { toast } from "sonner";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -24,34 +25,31 @@ export default function ReportesSection() {
   const [grupos, setGrupos] = useState<string[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const misGrupos = useMisGrupos();
 
-  // Cargar grupos desde alumnos (distinct)
+  // Cargar el usuario
   useEffect(() => {
     const cargar = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { setLoading(false); return; }
         setUserId(user.id);
-
-        const { data } = await supabase
-          .from("alumnos")
-          .select("grupo")
-          .eq("user_id", user.id)
-          .neq("grupo", null);
-
-        if (data && data.length > 0) {
-          const gruposUnicos = [...new Set(data.map((a: any) => a.grupo).filter(Boolean))].sort();
-          setGrupos(gruposUnicos);
-          setGrupoSeleccionado(gruposUnicos[0]);
-        }
       } catch (err) {
-        console.error("[Reportes] Error cargando grupos:", err);
+        console.error("[Reportes] Error cargando usuario:", err);
       } finally {
         setLoading(false);
       }
     };
     cargar();
   }, []);
+
+  // Grupos desde el perfil del maestro (Mis Grupos)
+  useEffect(() => {
+    if (misGrupos.length > 0) {
+      setGrupos(misGrupos);
+      setGrupoSeleccionado((g) => g && misGrupos.includes(g) ? g : misGrupos[0]);
+    }
+  }, [misGrupos]);
 
   const tabs = [
     { id: "asistencia" as const, label: "📅 Asistencia" },

@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
+import { useMisGrupos } from "./useMisGrupos";
 import { toast } from "sonner";
 
 /* ═════════════════════ TIPOS ═════════════════════ */
@@ -85,6 +86,7 @@ export default function EvaluacionesSection() {
   const [userId, setUserId] = useState<string | null>(null);
   const [grupos, setGrupos] = useState<string[]>([]);
   const [grupoSeleccionado, setGrupoSeleccionado] = useState<string>("");
+  const misGrupos = useMisGrupos();
   const [showIAModal, setShowIAModal] = useState(false);
   const [iaGenerating, setIaGenerating] = useState(false);
   const [iaForm, setIaForm] = useState({ materia: '', tema: '', tipo: 'rubrica' });
@@ -94,22 +96,16 @@ export default function EvaluacionesSection() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setUserId(user.id);
-
-      // Obtener grupos únicos de la tabla alumnos (campo 'grupo' como texto)
-      const { data } = await supabase
-        .from("alumnos")
-        .select("grupo")
-        .eq("user_id", user.id)
-        .eq("activo", true);
-
-      if (data && data.length > 0) {
-        const gruposUnicos = Array.from(new Set((data as { grupo: string }[]).map(a => a.grupo))).sort();
-        setGrupos(gruposUnicos);
-        setGrupoSeleccionado(gruposUnicos[0]);
-      }
     };
     cargar();
   }, []);
+
+  useEffect(() => {
+    if (misGrupos.length > 0) {
+      setGrupos(misGrupos);
+      setGrupoSeleccionado((g) => g && misGrupos.includes(g) ? g : misGrupos[0]);
+    }
+  }, [misGrupos]);
 
   const tabs = [
     { id: "rubricas" as const, label: "⭐ Rúbricas" },

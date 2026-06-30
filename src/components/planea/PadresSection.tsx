@@ -214,20 +214,27 @@ function useGruposReales(): string[] {
   const [grupos, setGrupos] = useState<string[]>(GRUPOS);
   useEffect(() => {
     if (!userId) return;
-    supabase.from("alumnos").select("grupo").eq("user_id", userId).eq("activo", true)
-      .then(({ data }) => {
-        // Dedupe por forma normalizada, conservando la primera variante vista
-        const vistos = new Set<string>();
-        const lista: string[] = [];
-        (data || []).forEach((a: any) => {
-          const g = (a.grupo || "").trim();
-          if (!g) return;
-          const key = normGrupo(g);
-          if (!vistos.has(key)) { vistos.add(key); lista.push(g); }
-        });
-        lista.sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
-        if (lista.length > 0) setGrupos(lista);
+    (async () => {
+      // 1) Grupos definidos en el perfil (Configuración → Mis Grupos)
+      try {
+        const { data: cfg } = await supabase.from("configuracion").select("grupos").eq("user_id", userId).maybeSingle();
+        const g = Array.isArray((cfg as { grupos?: string[] } | null)?.grupos)
+          ? ((cfg as { grupos?: string[] }).grupos || []).filter(Boolean) : [];
+        if (g.length > 0) { setGrupos(g); return; }
+      } catch { /* columna aún no existe */ }
+      // 2) Grupos distintos de los alumnos (dedupe normalizado)
+      const { data } = await supabase.from("alumnos").select("grupo").eq("user_id", userId).eq("activo", true);
+      const vistos = new Set<string>();
+      const lista: string[] = [];
+      (data || []).forEach((a: any) => {
+        const g = (a.grupo || "").trim();
+        if (!g) return;
+        const key = normGrupo(g);
+        if (!vistos.has(key)) { vistos.add(key); lista.push(g); }
       });
+      lista.sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+      if (lista.length > 0) setGrupos(lista);
+    })();
   }, [userId]);
   return grupos;
 }

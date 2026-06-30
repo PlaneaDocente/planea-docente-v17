@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  store, useStoreItem,
+  store, useStoreItem, GRUPOS,
   type Alumno, type Tutor, type Padre, type Justificacion,
   type Observacion, type RegistroAsistencia, type Aviso,
   type TareaDigital, type Mensaje,
@@ -282,6 +282,19 @@ export default function ConfiguracionSection() {
           onToggle={() => setActiveCard(activeCard === "docente" ? null : "docente")}
         >
           <DocenteManager />
+        </ConfigCard>
+
+        <ConfigCard
+          id="grupos"
+          icon={GraduationCap}
+          title="Mis Grupos"
+          description="Define los grados y grupos que impartes; aparecerán en todas las secciones."
+          color="text-indigo-600"
+          bg="bg-indigo-50 dark:bg-indigo-950"
+          isOpen={activeCard === "grupos"}
+          onToggle={() => setActiveCard(activeCard === "grupos" ? null : "grupos")}
+        >
+          <GruposManager />
         </ConfigCard>
 
         <ConfigCard
@@ -721,6 +734,104 @@ function DocenteManager() {
 }
 
 /* ═════════════════════ APARIENCIA ═════════════════════ */
+
+function GruposManager() {
+  const userId = useAuthUser();
+  const [seleccionados, setSeleccionados] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancel = false;
+    async function load() {
+      if (!userId) { setLoading(false); return; }
+      let inicial: string[] = [];
+      try {
+        const { data } = await supabase.from("configuracion").select("grupos").eq("user_id", userId).maybeSingle();
+        if (Array.isArray((data as { grupos?: string[] } | null)?.grupos)) {
+          inicial = ((data as { grupos?: string[] }).grupos || []).filter(Boolean);
+        }
+      } catch { /* columna aun no existe */ }
+      if (inicial.length === 0) {
+        const { data: al } = await supabase.from("alumnos").select("grupo").eq("user_id", userId).eq("activo", true);
+        inicial = Array.from(new Set((al || []).map((a: { grupo?: string }) => (a.grupo || "").trim()).filter(Boolean)));
+      }
+      if (!cancel) { setSeleccionados(inicial); setLoading(false); }
+    }
+    load();
+    return () => { cancel = true; };
+  }, [userId]);
+
+  const toggle = (g: string) => {
+    setSeleccionados((prev) => prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]);
+  };
+
+  const usarGruposDeAlumnos = async () => {
+    if (!userId) return;
+    const { data: al } = await supabase.from("alumnos").select("grupo").eq("user_id", userId).eq("activo", true);
+    const set = Array.from(new Set((al || []).map((a: { grupo?: string }) => (a.grupo || "").trim()).filter(Boolean)));
+    if (set.length === 0) { toast.error("No tienes alumnos registrados todavia."); return; }
+    setSeleccionados(set);
+    toast.success(`Se cargaron ${set.length} grupo(s) de tus alumnos.`);
+  };
+
+  const guardar = async () => {
+    if (!userId) { toast.error("Inicia sesion."); return; }
+    setSaving(true);
+    const ordenados = [...seleccionados].sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+    const { error } = await supabase.from("configuracion").upsert(
+      { user_id: userId, grupos: ordenados, actualizado_en: new Date().toISOString() },
+      { onConflict: "user_id" }
+    );
+    setSaving(false);
+    if (error) {
+      if (error.code === "42703") toast.error("Falta la columna 'grupos'. Corre el SQL de Mis Grupos en Supabase.");
+      else toast.error("Error al guardar: " + error.message);
+      return;
+    }
+    toast.success("Grupos guardados. Apareceran en todas las secciones (recarga si es necesario).");
+  };
+
+  if (loading) {
+    return <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Marca los grados y grupos que impartes. Apareceran por defecto en Alumnos, Asistencia, Evaluaciones, Padres, etc., sin que tengas que seleccionarlos en cada seccion.
+      </p>
+
+      <Button variant="outline" size="sm" className="gap-2" onClick={usarGruposDeAlumnos}>
+        <GraduationCap className="w-4 h-4" /> Usar los grupos de mis alumnos
+      </Button>
+
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+        {GRUPOS.map((g) => {
+          const activo = seleccionados.includes(g);
+          return (
+            <button
+              key={g}
+              onClick={() => toggle(g)}
+              className={`text-sm rounded-xl px-2 py-2 border transition-colors ${activo ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
+            >
+              {g}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="text-xs text-muted-foreground">
+        Seleccionados: {seleccionados.length > 0 ? seleccionados.join(", ") : "ninguno"}
+      </div>
+
+      <Button className="w-full gap-2" onClick={guardar} disabled={saving}>
+        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+        Guardar mis grupos
+      </Button>
+    </div>
+  );
+}
 
 function AparienciaManager() {
   const userId = useAuthUser();
