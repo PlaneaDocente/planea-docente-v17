@@ -6,7 +6,8 @@ import {
   Send, Bell, MessageSquare, Plus, CheckCircle2, Loader2, Users,
   Megaphone, BookOpen, Trash2, X, Search, Phone, Mail,
   Smartphone, UserPlus, Hash, Eye, Pencil,
-  RefreshCw, Info, CloudOff, Cloud
+  RefreshCw, Info, CloudOff, Cloud,
+  Save, Copy, ExternalLink, QrCode, Link2, Check
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,11 +21,14 @@ import {
 
 /* ═════════════════════ CONSTANTES ═════════════════════ */
 
-const TABS = [
-  { id: "avisos" as TabId, label: "Avisos", icon: Megaphone },
-  { id: "tareas" as TabId, label: "Tareas Digitales", icon: BookOpen },
-  { id: "mensajes" as TabId, label: "Mensajes", icon: MessageSquare },
-  { id: "padres" as TabId, label: "Padres de Familia", icon: Users },
+type TabLocal = TabId | "whatsapp";
+
+const TABS: { id: TabLocal; label: string; icon: typeof Megaphone }[] = [
+  { id: "avisos", label: "Avisos", icon: Megaphone },
+  { id: "tareas", label: "Tareas Digitales", icon: BookOpen },
+  { id: "mensajes", label: "Mensajes", icon: MessageSquare },
+  { id: "padres", label: "Padres de Familia", icon: Users },
+  { id: "whatsapp", label: "Grupos WhatsApp", icon: Smartphone },
 ];
 
 function getTipoBadge(tipo: AvisoTipo) {
@@ -239,14 +243,144 @@ function useGruposReales(): string[] {
   return grupos;
 }
 
+function WhatsAppGruposView() {
+  const userId = useAuthUser();
+  const grupos = useGruposReales();
+  const [links, setLinks] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      if (!userId) { setLoading(false); return; }
+      try {
+        const { data } = await supabase.from("configuracion").select("whatsapp_grupos").eq("user_id", userId).maybeSingle();
+        const map = (data as { whatsapp_grupos?: Record<string, string> } | null)?.whatsapp_grupos;
+        if (!cancel && map && typeof map === "object") setLinks(map);
+      } catch { /* columna aún no existe */ }
+      if (!cancel) setLoading(false);
+    })();
+    return () => { cancel = true; };
+  }, [userId]);
+
+  const setLink = (g: string, v: string) => setLinks((prev) => ({ ...prev, [g]: v }));
+
+  const guardar = async () => {
+    if (!userId) { toast.error("Inicia sesión."); return; }
+    setSaving(true);
+    const limpio: Record<string, string> = {};
+    Object.entries(links).forEach(([k, v]) => { if (v && v.trim()) limpio[k] = v.trim(); });
+    const { error } = await supabase.from("configuracion").upsert(
+      { user_id: userId, whatsapp_grupos: limpio, actualizado_en: new Date().toISOString() },
+      { onConflict: "user_id" }
+    );
+    setSaving(false);
+    if (error) {
+      if (error.code === "42703") toast.error("Falta la columna 'whatsapp_grupos'. Corre el SQL en Supabase.");
+      else toast.error("Error al guardar: " + error.message);
+      return;
+    }
+    toast.success("Enlaces de grupos guardados.");
+  };
+
+  const copiar = (url: string) => {
+    navigator.clipboard?.writeText(url).then(() => toast.success("Enlace copiado")).catch(() => toast.error("No se pudo copiar"));
+  };
+
+  const esLinkValido = (u: string) => /^https:\/\/chat\.whatsapp\.com\//i.test((u || "").trim());
+
+  if (loading) return <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-gradient-to-r from-green-600 to-emerald-600 rounded-2xl p-5 text-white">
+        <div className="flex items-center gap-3 mb-1">
+          <Smartphone className="w-6 h-6" />
+          <h3 className="font-bold text-lg">Grupos de WhatsApp</h3>
+        </div>
+        <p className="text-white/80 text-sm">Pega el enlace de invitación de tu grupo de WhatsApp por cada grado. Los padres se unen con un toque o escaneando el QR. Después envías tus avisos una sola vez dentro del grupo y llega a todos.</p>
+      </div>
+
+      <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl p-3 text-xs text-blue-700 dark:text-blue-300 space-y-1">
+        <p className="font-semibold flex items-center gap-1"><Info className="w-3.5 h-3.5" /> ¿Cómo obtengo el enlace?</p>
+        <p>En WhatsApp: abre tu grupo → toca el <b>nombre del grupo</b> → <b>&quot;Invitar al grupo mediante enlace&quot;</b> → <b>&quot;Copiar enlace&quot;</b>. Luego pégalo aquí en el grado que corresponda y guarda.</p>
+      </div>
+
+      {grupos.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-6">Primero define tus grupos en <b>Configuración → Mis Grupos</b>, o registra alumnos.</p>
+      ) : (
+        <div className="space-y-3">
+          {grupos.map((g) => {
+            const url = links[g] || "";
+            const valido = esLinkValido(url);
+            return (
+              <div key={g} className="bg-card rounded-2xl border border-border p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold bg-primary/10 text-primary px-2.5 py-1 rounded-lg">{g}</span>
+                  {valido && <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> enlace listo</span>}
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2 bg-muted rounded-xl px-3 py-2 border border-border">
+                      <Link2 className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <input
+                        value={url}
+                        onChange={(e) => setLink(g, e.target.value)}
+                        placeholder="https://chat.whatsapp.com/..."
+                        className="flex-1 bg-transparent text-sm outline-none"
+                      />
+                    </div>
+                    {url && !valido && <p className="text-[11px] text-amber-600">El enlace debe empezar con https://chat.whatsapp.com/</p>}
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" className="gap-1 text-green-700 border-green-300" disabled={!valido} onClick={() => window.open(url, "_blank")}>
+                        <ExternalLink className="w-3.5 h-3.5" /> Abrir grupo
+                      </Button>
+                      <Button size="sm" variant="outline" className="gap-1" disabled={!url} onClick={() => copiar(url)}>
+                        <Copy className="w-3.5 h-3.5" /> Copiar enlace
+                      </Button>
+                    </div>
+                  </div>
+                  {valido && (
+                    <div className="flex flex-col items-center gap-1 shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(url)}`}
+                        alt={`QR del grupo ${g}`}
+                        width={120}
+                        height={120}
+                        className="rounded-lg border border-border bg-white p-1"
+                      />
+                      <span className="text-[10px] text-muted-foreground flex items-center gap-1"><QrCode className="w-3 h-3" /> Escanea para unirse</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <Button className="w-full gap-2" onClick={guardar} disabled={saving}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Guardar enlaces
+          </Button>
+        </div>
+      )}
+
+      <div className="bg-muted/40 rounded-xl p-3 text-xs text-muted-foreground">
+        <p className="font-semibold mb-1 flex items-center gap-1"><Info className="w-3.5 h-3.5" /> ¿Por qué de esta forma?</p>
+        <p>WhatsApp no permite el envío masivo automático desde una página web (es su política). La manera <b>gratis</b> y práctica es tener un grupo por grado: compartes el enlace/QR una vez, los padres se unen, y luego publicas tu aviso una sola vez en el grupo para llegar a todos.</p>
+      </div>
+    </div>
+  );
+}
+
 /* ═════════════════════ COMPONENTE PRINCIPAL ═════════════════════ */
 
 export default function PadresSection() {
-  const [activeTab, setActiveTab] = useState<TabId>("avisos");
+  const [activeTab, setActiveTab] = useState<TabLocal>("avisos");
   const [showModal, setShowModal] = useState(false);
   const [modalType, setModalType] = useState<TabId>("avisos");
 
-  const openModal = (type: TabId) => {
+  const openModal = (type: TabLocal) => {
+    if (type === "whatsapp") return;
     setModalType(type);
     setShowModal(true);
   };
@@ -274,9 +408,11 @@ export default function PadresSection() {
             );
           })}
         </div>
-        <Button size="sm" className="gap-2" onClick={() => openModal(activeTab)}>
-          <Plus className="w-4 h-4" /> Nuevo
-        </Button>
+        {activeTab !== "whatsapp" && (
+          <Button size="sm" className="gap-2" onClick={() => openModal(activeTab)}>
+            <Plus className="w-4 h-4" /> Nuevo
+          </Button>
+        )}
       </div>
 
       <AnimatePresence mode="wait">
@@ -291,6 +427,7 @@ export default function PadresSection() {
           {activeTab === "tareas" && <TareasDigitalesView />}
           {activeTab === "mensajes" && <MensajesView />}
           {activeTab === "padres" && <PadresView />}
+          {activeTab === "whatsapp" && <WhatsAppGruposView />}
         </motion.div>
       </AnimatePresence>
 
