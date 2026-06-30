@@ -105,6 +105,7 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
   const [todos, setTodos] = useState<any[]>([]);
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [waLink, setWaLink] = useState<string>("");
 
   useEffect(() => {
     const load = async () => {
@@ -120,6 +121,13 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
       const all: Record<string, boolean> = {};
       activos.forEach((p: any) => { all[p.id] = true; });
       setSel(all);
+      // Enlace del grupo de WhatsApp guardado para este grado
+      try {
+        const { data: cfg } = await supabase.from("configuracion").select("whatsapp_grupos").eq("user_id", userId).maybeSingle();
+        const map = (cfg as { whatsapp_grupos?: Record<string, string> } | null)?.whatsapp_grupos || {};
+        const found = Object.entries(map).find(([k]) => normGrupo(k) === objetivo);
+        setWaLink(found ? found[1] : "");
+      } catch { /* columna aún no existe */ }
       setLoading(false);
     };
     load();
@@ -149,10 +157,33 @@ function EnviarAPadresModal({ grupo, asunto, cuerpo, userId, onClose }: {
     toast.success(`Abriendo WhatsApp para ${conTel.length} padre(s). Si el navegador bloquea ventanas, toca "permitir".`);
   };
 
+  const enviarAlGrupoWhatsApp = async () => {
+    const texto = asunto ? `${asunto}\n\n${cuerpo}` : cuerpo;
+    try { await navigator.clipboard?.writeText(texto); } catch { /* algunos navegadores lo bloquean */ }
+    window.open(waLink, "_blank");
+    toast.success("Mensaje copiado. Pégalo en el grupo de WhatsApp y envíalo (llega a todos).");
+  };
+
   return (
     <ModalWrapper title="Enviar a padres de familia" icon={Send} onClose={onClose}>
       <div className="space-y-3">
         <div className="text-xs text-muted-foreground">Grupo <b>{grupo}</b>{asunto ? <> · asunto: <b>{asunto}</b></> : null}</div>
+
+        {!loading && (
+          waLink ? (
+            <button onClick={enviarAlGrupoWhatsApp} className="w-full flex items-center gap-3 bg-green-600 hover:bg-green-700 text-white rounded-xl px-4 py-3 transition-colors text-left">
+              <Smartphone className="w-5 h-5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">Enviar al grupo de WhatsApp</p>
+                <p className="text-[11px] text-white/80">Copia el mensaje y abre el grupo de {grupo}. Solo pega y envía: llega a todos a la vez.</p>
+              </div>
+            </button>
+          ) : (
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2.5 text-[11px] text-amber-700 dark:text-amber-300">
+              Para enviar a todo el grupo de una vez, guarda el enlace de WhatsApp de <b>{grupo}</b> en la pestaña <b>Grupos WhatsApp</b>.
+            </div>
+          )
+        )}
         {loading ? (
           <div className="flex justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
         ) : padres.length === 0 ? (
@@ -754,6 +785,26 @@ function MensajesView() {
   const [padresGrupo, setPadresGrupo] = useState<any[]>([]);
   const [msgPadres, setMsgPadres] = useState("");
   const [selectorAbierto, setSelectorAbierto] = useState(false);
+  const [waLink, setWaLink] = useState("");
+
+  useEffect(() => {
+    if (!userId || !grupoSeleccionado) { setWaLink(""); return; }
+    (async () => {
+      try {
+        const { data: cfg } = await supabase.from("configuracion").select("whatsapp_grupos").eq("user_id", userId).maybeSingle();
+        const map = (cfg as { whatsapp_grupos?: Record<string, string> } | null)?.whatsapp_grupos || {};
+        const found = Object.entries(map).find(([k]) => normGrupo(k) === normGrupo(grupoSeleccionado));
+        setWaLink(found ? found[1] : "");
+      } catch { setWaLink(""); }
+    })();
+  }, [userId, grupoSeleccionado]);
+
+  const enviarAlGrupoWA = async () => {
+    if (!msgPadres.trim()) { toast.error("Escribe el mensaje primero."); return; }
+    try { await navigator.clipboard?.writeText(msgPadres.trim()); } catch { /* algunos navegadores lo bloquean */ }
+    window.open(waLink, "_blank");
+    toast.success("Mensaje copiado. Pégalo en el grupo de WhatsApp y envíalo.");
+  };
 
   useEffect(() => {
     const cargarPadres = async () => {
@@ -892,6 +943,11 @@ function MensajesView() {
               className="w-full bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary resize-none"
             />
             <div className="flex flex-wrap gap-2">
+              {waLink && (
+                <Button size="sm" className="gap-2 bg-green-600 hover:bg-green-700" onClick={enviarAlGrupoWA}>
+                  <Smartphone className="w-4 h-4" /> Enviar al grupo de WhatsApp
+                </Button>
+              )}
               <Button size="sm" variant="outline" className="gap-2 text-green-700 border-green-300"
                 onClick={() => {
                   if (!msgPadres.trim()) { toast.error("Escribe el mensaje primero."); return; }
