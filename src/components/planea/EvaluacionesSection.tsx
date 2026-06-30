@@ -358,6 +358,46 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
     if (!error) { toast.success("Evaluación publicada"); cargar(); }
   };
 
+  const descargarExamenWord = (r: Evaluacion) => {
+    const preguntas = Array.isArray(r.criterios) ? r.criterios : [];
+    const fecha = new Date().toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "numeric" });
+    const esc = (s: string) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const preguntasHTML = preguntas.map((p, i) => `
+      <p style="margin:14px 0 4px 0;"><b>${i + 1}.</b> ${esc(p)}</p>
+      <p style="border-bottom:1px solid #999;height:16px;margin:0 0 4px 0;">&nbsp;</p>
+      <p style="border-bottom:1px solid #999;height:16px;margin:0 0 12px 0;">&nbsp;</p>`).join("");
+    const html = `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>${esc(r.titulo)}</title></head>
+<body style="font-family:Calibri,Arial,sans-serif;font-size:12pt;color:#000;">
+  <div style="text-align:center;">
+    <p style="margin:0;font-size:11pt;">Escuela: ______________________________________________</p>
+    <h3 style="margin:8px 0;">${esc(r.titulo)}</h3>
+  </div>
+  <table style="width:100%;font-size:11pt;margin:8px 0;border-collapse:collapse;">
+    <tr><td style="padding:3px;">Alumno(a): _______________________________</td><td style="padding:3px;">Grupo: ${esc(r.grupo || "")}</td></tr>
+    <tr><td style="padding:3px;">Materia: ${esc(r.materia || "")}</td><td style="padding:3px;">Fecha: ${fecha}</td></tr>
+    <tr><td style="padding:3px;">Campo formativo: ${esc(r.campo_formativo || "")}</td><td style="padding:3px;">Trimestre: ${r.trimestre || 1}</td></tr>
+    <tr><td style="padding:3px;">Aciertos: ______ / ${preguntas.length}</td><td style="padding:3px;">Calificación: ______</td></tr>
+  </table>
+  <p style="font-size:11pt;"><b>Instrucciones:</b> Lee con atención cada pregunta y responde en las líneas.</p>
+  <hr/>
+  ${preguntasHTML}
+  <br/>
+  <p style="font-size:9pt;color:#666;text-align:center;">Generado con PlaneaDocente.com — Nueva Escuela Mexicana</p>
+</body></html>`;
+    const blob = new Blob(["\ufeff", html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(r.titulo || "examen").replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/gi, "").trim() || "examen"}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("Examen descargado en Word (.doc), listo para editar.");
+  };
+
   const tituloTipo = tipo === "rubrica" ? "Rúbricas de Evaluación" : tipo === "cotejo" ? "Listas de Cotejo" : "Exámenes";
 
   return (
@@ -429,6 +469,11 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
                 </div>
                 <p className="text-xs text-muted-foreground">{r.materia} · {Array.isArray(r.criterios) ? r.criterios.length : 0} {tipo === "examen" ? "preguntas" : tipo === "rubrica" ? "criterios" : "ítems"}</p>
               </div>
+              {tipo === "examen" && (
+                <Button size="sm" variant="outline" className="text-xs h-7 gap-1 text-blue-700" onClick={() => descargarExamenWord(r)}>
+                  <Download className="w-3.5 h-3.5" /> Word
+                </Button>
+              )}
               {r.estado !== "publicado" && (
                 <Button size="sm" variant="ghost" className="text-xs h-7 text-emerald-600" onClick={() => publicar(r.id)}>Publicar</Button>
               )}
