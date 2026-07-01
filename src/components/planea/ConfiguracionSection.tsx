@@ -10,7 +10,7 @@ import {
   Image, Type, Phone, Mail, MapPin, GraduationCap,
   CreditCard, CheckCircle2, Zap, Star, ArrowRight,
   Copy, ExternalLink, Eye, EyeOff, Lock, Unlock,
-  Cloud, CloudOff, Building2, MapPinned, DoorOpen, BookOpenCheck
+  Cloud, CloudOff, Building2, MapPinned, DoorOpen, BookOpenCheck, Plus
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -740,6 +740,8 @@ function GruposManager() {
   const [seleccionados, setSeleccionados] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [nuevoGrado, setNuevoGrado] = useState("1°");
+  const [nuevaLetra, setNuevaLetra] = useState("A");
 
   useEffect(() => {
     let cancel = false;
@@ -775,6 +777,13 @@ function GruposManager() {
     toast.success(`Se cargaron ${set.length} grupo(s) de tus alumnos.`);
   };
 
+  const agregarGrupo = () => {
+    const g = `${nuevoGrado}${nuevaLetra}`;
+    if (seleccionados.includes(g)) { toast.info(`${g} ya está en tu lista.`); return; }
+    setSeleccionados((prev) => [...prev, g].sort((a, b) => a.localeCompare(b, "es", { numeric: true })));
+    toast.success(`${g} agregado.`);
+  };
+
   const guardar = async () => {
     if (!userId) { toast.error("Inicia sesion."); return; }
     setSaving(true);
@@ -806,8 +815,24 @@ function GruposManager() {
         <GraduationCap className="w-4 h-4" /> Usar los grupos de mis alumnos
       </Button>
 
+      <div className="bg-muted/40 rounded-xl p-3 space-y-2">
+        <p className="text-xs font-medium text-muted-foreground">Agregar un grupo con cualquier letra (A–Z):</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={nuevoGrado} onChange={(e) => setNuevoGrado(e.target.value)} className="bg-card rounded-lg px-2 py-1.5 text-sm border border-border outline-none">
+            {["1°","2°","3°","4°","5°","6°"].map((gr) => <option key={gr} value={gr}>{gr}</option>)}
+          </select>
+          <select value={nuevaLetra} onChange={(e) => setNuevaLetra(e.target.value)} className="bg-card rounded-lg px-2 py-1.5 text-sm border border-border outline-none">
+            {Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)).map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+          <span className="text-sm font-semibold text-primary">{nuevoGrado}{nuevaLetra}</span>
+          <Button size="sm" variant="outline" className="gap-1" onClick={agregarGrupo}>
+            <Plus className="w-3.5 h-3.5" /> Agregar
+          </Button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-        {GRUPOS.map((g) => {
+        {Array.from(new Set([...GRUPOS, ...seleccionados])).sort((a, b) => a.localeCompare(b, "es", { numeric: true })).map((g) => {
           const activo = seleccionados.includes(g);
           return (
             <button

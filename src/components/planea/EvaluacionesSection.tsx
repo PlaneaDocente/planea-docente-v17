@@ -30,6 +30,7 @@ interface Evaluacion {
   campo_formativo?: string | null;
   estructura?: RubricaEstructura | null;
   trimestre?: number | null;
+  generado_ia?: boolean | null;
 }
 
 const TRIMESTRES = [
@@ -141,11 +142,15 @@ export default function EvaluacionesSection() {
         user_id: user.id,
         titulo: ev.titulo,
         tipo: ev.tipo || iaForm.tipo,
-        materia: ev.materia || iaForm.materia,
+        materia: ev.materia || ev.campo_formativo || iaForm.materia,
+        campo_formativo: ev.campo_formativo || null,
+        trimestre: 1,
         grupo: grupoSeleccionado,
         criterios: ev.criterios || [],
+        estructura: ev.estructura || null,
         estado: "borrador",
         descripcion: ev.descripcion || "",
+        generado_ia: true,
       });
 
       if (error) { toast.error("Error guardando: " + error.message); }
@@ -465,6 +470,7 @@ function EvaluacionesView({ grupo, userId, tipo }: { grupo: string; userId: stri
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-medium truncate">{r.titulo}</p>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${r.estado === "publicado" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{r.estado}</span>
+                  {r.generado_ia && <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Generada con IA</span>}
                 </div>
                 <p className="text-xs text-muted-foreground">{r.materia} · {Array.isArray(r.criterios) ? r.criterios.length : 0} {tipo === "examen" ? "preguntas" : tipo === "rubrica" ? "criterios" : "ítems"}</p>
               </div>
@@ -782,6 +788,7 @@ function RubricasView({ grupo, userId }: { grupo: string; userId: string | null 
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-medium truncate">{r.titulo}</p>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${r.estado === "publicado" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{r.estado}</span>
+                  {r.generado_ia && <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Generada con IA</span>}
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {r.campo_formativo || r.materia} · {nFilas} indicadores × {nNiveles} niveles
@@ -1339,6 +1346,7 @@ function CotejosView({ grupo, userId }: { grupo: string; userId: string | null }
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-medium truncate">{r.titulo}</p>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${r.estado === "publicado" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{r.estado}</span>
+                  {r.generado_ia && <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Generada con IA</span>}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {r.campo_formativo || r.materia} · {nFilas} indicadores · escala: {(est?.niveles || []).join(" / ") || "—"}
