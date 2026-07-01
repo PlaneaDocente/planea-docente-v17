@@ -348,10 +348,12 @@ function RegistroDiarioView() {
 /* ═════════════════════ JUSTIFICACIONES (SUPABASE) ═════════════════════ */
 
 function JustificacionesView() {
+  const misGrupos = useMisGrupos();
   const [justificaciones, setJustificaciones] = useState<Justificacion[]>([]);
   const [alumnos, setAlumnos] = useState<AlumnoMini[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [grupoFiltro, setGrupoFiltro] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -379,9 +381,11 @@ function JustificacionesView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const grupoDeAlumno = (alumnoId: string) => alumnos.find((a) => a.id === alumnoId)?.grupo || "";
   const filtered = justificaciones.filter((j) =>
-    j.alumno_nombre.toLowerCase().includes(search.toLowerCase()) ||
-    j.motivo.toLowerCase().includes(search.toLowerCase())
+    (j.alumno_nombre.toLowerCase().includes(search.toLowerCase()) ||
+    j.motivo.toLowerCase().includes(search.toLowerCase())) &&
+    (!grupoFiltro || grupoDeAlumno(j.alumno_id) === grupoFiltro)
   );
 
   const handleDelete = async (id: string) => {
@@ -407,6 +411,10 @@ function JustificacionesView() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input type="text" placeholder="Buscar justificación..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
         </div>
+        <select value={grupoFiltro} onChange={(e) => setGrupoFiltro(e.target.value)} className="bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary">
+          <option value="">Todos los grupos</option>
+          {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
         <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
           <Plus className="w-4 h-4" /> Nueva Justificación
         </Button>

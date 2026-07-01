@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   GraduationCap, LayoutDashboard, Users, CalendarCheck, BookOpen,
   ClipboardList, Star, Camera, FileText, MessageSquare, Settings,
-  LogOut, Crown, Zap, Menu, Loader2
+  LogOut, Crown, Zap, Menu, Loader2, Building2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,7 @@ const ReportesSection = lazy(() => import("@/components/planea/ReportesSection")
 const PadresSection = lazy(() => import("@/components/planea/PadresSection"));
 const HerramientasIASection = lazy(() => import("@/components/planea/HerramientasIASection"));
 const ConfiguracionSection = lazy(() => import("@/components/planea/ConfiguracionSection"));
+const DirectivosSection = lazy(() => import("@/components/planea/DirectivosSection"));
 
 const SECTIONS = [
   { id: "inicio",      label: "Dashboard",    icon: LayoutDashboard, component: DashboardSection, requiresPro: false },
@@ -36,6 +37,7 @@ const SECTIONS = [
   { id: "evidencias",  label: "Evidencias",   icon: Camera,           component: EvidenciasSection,  requiresPro: false },
   { id: "reportes",    label: "Reportes",     icon: FileText,         component: ReportesSection,    requiresPro: true },
   { id: "padres",      label: "Padres",       icon: MessageSquare,    component: PadresSection,      requiresPro: true },
+  { id: "directivos",  label: "Directivos",   icon: Building2,        component: DirectivosSection,  requiresPro: true, soloInstitucional: true },
   { id: "herramientas-ia", label: "Herramientas IA", icon: Zap,       component: HerramientasIASection, requiresPro: true },
   { id: "configuracion", label: "Configuración", icon: Settings,      component: ConfiguracionSection, requiresPro: false },
 ];
@@ -162,6 +164,15 @@ export default function DashboardPage() {
   const hasActivePlan = subscription?.subscription && 
     (subscription.subscription.estado === "active" || subscription.subscription.estado === "trialing");
 
+  // ¿Plan Institucional? (para mostrar la sección Directivos)
+  const esInstitucional = hasActivePlan && (
+    subscription?.plan?.id === "institucional" ||
+    (subscription?.plan?.nombre || "").toLowerCase() === "institucional"
+  );
+
+  // Secciones visibles según el plan (Directivos solo en Institucional)
+  const visibleSections = SECTIONS.filter((s: any) => !s.soloInstitucional || esInstitucional);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
@@ -170,7 +181,7 @@ export default function DashboardPage() {
     );
   }
 
-  const currentSection = SECTIONS.find(s => s.id === activeSection);
+  const currentSection = visibleSections.find(s => s.id === activeSection);
   const ActiveComponent = currentSection?.component;
   const requiresPro = currentSection?.requiresPro || false;
   const isBlocked = requiresPro && !hasActivePlan;
@@ -196,7 +207,7 @@ export default function DashboardPage() {
           </div>
         </div>
         <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-          {SECTIONS.map((section) => {
+          {visibleSections.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
             const isLocked = section.requiresPro && !hasActivePlan;

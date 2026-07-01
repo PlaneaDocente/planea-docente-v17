@@ -411,12 +411,14 @@ function NuevoAlumnoModal({ onClose, userId, defaultGrupo }: { onClose: () => vo
 /* ═════════════════════ HISTORIAL ═════════════════════ */
 
 function HistorialView() {
+  const misGrupos = useMisGrupos();
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [tutores, setTutores] = useState<Tutor[]>([]);
   const [observaciones, setObservaciones] = useState<Observacion[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAlumno, setSelectedAlumno] = useState("");
   const [search, setSearch] = useState("");
+  const [grupoFiltro, setGrupoFiltro] = useState("");
 
   const loadData = useCallback(async () => {
     try {
@@ -443,7 +445,10 @@ function HistorialView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const filtered = alumnos.filter((a) => a.nombre.toLowerCase().includes(search.toLowerCase()));
+  const filtered = alumnos.filter((a) =>
+    a.nombre.toLowerCase().includes(search.toLowerCase()) &&
+    (!grupoFiltro || a.grupo === grupoFiltro)
+  );
 
   if (loading) {
     return <div className="flex items-center justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
@@ -456,6 +461,10 @@ function HistorialView() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input type="text" placeholder="Buscar alumno..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
         </div>
+        <select value={grupoFiltro} onChange={(e) => setGrupoFiltro(e.target.value)} className="bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary">
+          <option value="">Todos los grupos</option>
+          {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
       </div>
       {!selectedAlumno ? (
         <div className="space-y-2">
@@ -546,10 +555,12 @@ function AlumnoHistorial({ alumnoId, onBack, alumnos, tutores, observaciones }: 
 /* ═════════════════════ TUTORES (CRUD SUPABASE) ═════════════════════ */
 
 function TutoresView() {
+  const misGrupos = useMisGrupos();
   const [tutores, setTutores] = useState<Tutor[]>([]);
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [grupoFiltro, setGrupoFiltro] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -578,8 +589,9 @@ function TutoresView() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const filtered = tutores.filter((t) =>
-    t.nombre.toLowerCase().includes(search.toLowerCase()) ||
-    t.alumno_nombre.toLowerCase().includes(search.toLowerCase())
+    (t.nombre.toLowerCase().includes(search.toLowerCase()) ||
+    t.alumno_nombre.toLowerCase().includes(search.toLowerCase())) &&
+    (!grupoFiltro || (t as any).grupo === grupoFiltro)
   );
 
   const handleDelete = async (id: string) => {
@@ -605,6 +617,10 @@ function TutoresView() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input type="text" placeholder="Buscar tutor o alumno..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
         </div>
+        <select value={grupoFiltro} onChange={(e) => setGrupoFiltro(e.target.value)} className="bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary">
+          <option value="">Todos los grupos</option>
+          {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
         <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
           <Plus className="w-4 h-4" /> Nuevo Tutor
         </Button>
@@ -773,10 +789,12 @@ function NuevoTutorModal({ onClose, alumnos, userId }: { onClose: () => void; al
 /* ═════════════════════ OBSERVACIONES (CRUD SUPABASE) ═════════════════════ */
 
 function ObservacionesView() {
+  const misGrupos = useMisGrupos();
   const [observaciones, setObservaciones] = useState<Observacion[]>([]);
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [grupoFiltro, setGrupoFiltro] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -790,7 +808,7 @@ function ObservacionesView() {
 
       const [{ data: obData }, { data: alData }] = await Promise.all([
         supabase.from("observaciones").select("*").eq("user_id", uid).order("fecha", { ascending: false }),
-        supabase.from("alumnos").select("id, nombre, activo").eq("user_id", uid).eq("activo", true),
+        supabase.from("alumnos").select("id, nombre, grupo, activo").eq("user_id", uid).eq("activo", true),
       ]);
 
       setObservaciones((obData as Observacion[]) || []);
@@ -804,9 +822,11 @@ function ObservacionesView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const grupoDeAlumno = (alumnoId: string) => alumnos.find((a) => a.id === alumnoId)?.grupo || "";
   const filtered = observaciones.filter((o) =>
-    o.alumno_nombre.toLowerCase().includes(search.toLowerCase()) ||
-    o.descripcion.toLowerCase().includes(search.toLowerCase())
+    (o.alumno_nombre.toLowerCase().includes(search.toLowerCase()) ||
+    o.descripcion.toLowerCase().includes(search.toLowerCase())) &&
+    (!grupoFiltro || grupoDeAlumno(o.alumno_id) === grupoFiltro)
   );
 
   const handleDelete = async (id: string) => {
@@ -832,6 +852,10 @@ function ObservacionesView() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input type="text" placeholder="Buscar observación..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full bg-muted rounded-xl pl-9 pr-3 py-2 text-sm outline-none border border-border focus:border-primary" />
         </div>
+        <select value={grupoFiltro} onChange={(e) => setGrupoFiltro(e.target.value)} className="bg-muted rounded-xl px-3 py-2 text-sm outline-none border border-border focus:border-primary">
+          <option value="">Todos los grupos</option>
+          {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
         <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
           <Plus className="w-4 h-4" /> Nueva Observación
         </Button>
