@@ -20,6 +20,7 @@ import DescargasSection from "./DescargasSection";
 import HerramientasIASection from "./HerramientasIASection";
 import SuscripcionSection from "./SuscripcionSection";
 import AfiliatesSection from "./AfiliatesSection";
+import DirectivosSection from "./DirectivosSection";
 import AuthGate from "@/components/auth/AuthGate";
 import LandingPage from "@/components/landing/LandingPage";
 import type { User } from "@supabase/supabase-js";
@@ -29,6 +30,7 @@ type AppView = "loading" | "landing" | "auth" | "dashboard";
 
 function MainContent({ user }: { user: User }) {
   const { activeSection } = useAppStore();
+  const currentPlan = useAppStore((s) => s.currentPlan);
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -51,6 +53,7 @@ function MainContent({ user }: { user: User }) {
             {activeSection === "herramientas-ia" && <HerramientasIASection />}
             {activeSection === "suscripcion"    && <SuscripcionSection />}
             {activeSection === "afiliados"      && <AfiliatesSection />}
+            {activeSection === "directivos"     && currentPlan === "institucional" && <DirectivosSection />}
           </div>
         </main>
       </div>

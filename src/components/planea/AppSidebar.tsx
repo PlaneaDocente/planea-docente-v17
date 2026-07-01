@@ -5,12 +5,14 @@ import {
   Home, Users, CalendarCheck, BookOpen, Target,
   BarChart3, Camera, FileText, MessageSquare, Settings,
   Download, X, GraduationCap, ChevronRight, Wand2, CreditCard,
-  Award, LogOut,
+  Award, LogOut, Building2,
 } from "lucide-react";
 import { useAppStore } from "@/store/app-store";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+
+type NavEntry = { id: string; label: string; icon: React.ElementType; emoji: string };
 
 const navItems = [
   { id: "inicio", label: "Inicio", icon: Home, emoji: "🏠" },
@@ -31,6 +33,14 @@ const navItems = [
 
 export default function AppSidebar() {
   const { activeSection, setActiveSection, sidebarOpen, setSidebarOpen } = useAppStore();
+  const currentPlan = useAppStore((s) => s.currentPlan);
+  const items: NavEntry[] = currentPlan === "institucional"
+    ? [
+        ...navItems.slice(0, 9),
+        { id: "directivos", label: "Directivos", icon: Building2, emoji: "🏫" },
+        ...navItems.slice(9),
+      ]
+    : [...navItems];
 
   return (
     <>
@@ -60,7 +70,7 @@ export default function AppSidebar() {
               <div className="flex flex-col h-full min-w-[256px]">
                 <SidebarHeader onClose={() => setSidebarOpen(false)} />
                 <nav className="flex-1 overflow-y-auto py-4 px-3">
-                  {navItems.map((item) => (
+                  {items.map((item) => (
                     <NavItem
                       key={item.id}
                       item={item}
@@ -109,7 +119,7 @@ function NavItem({
   isActive,
   onClick,
 }: {
-  item: (typeof navItems)[number];
+  item: NavEntry;
   isActive: boolean;
   onClick: () => void;
 }) {
