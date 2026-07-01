@@ -34,7 +34,9 @@ const navItems = [
 export default function AppSidebar() {
   const { activeSection, setActiveSection, sidebarOpen, setSidebarOpen } = useAppStore();
   const currentPlan = useAppStore((s) => s.currentPlan);
-  const items: NavEntry[] = currentPlan === "institucional"
+  const subscription = useAppStore((s) => s.subscription);
+  const esInstitucional = currentPlan === "institucional" || subscription?.plan_id === "institucional";
+  const items: NavEntry[] = esInstitucional
     ? [
         ...navItems.slice(0, 9),
         { id: "directivos", label: "Directivos", icon: Building2, emoji: "🏫" },

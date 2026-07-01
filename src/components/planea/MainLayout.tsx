@@ -31,6 +31,8 @@ type AppView = "loading" | "landing" | "auth" | "dashboard";
 function MainContent({ user }: { user: User }) {
   const { activeSection } = useAppStore();
   const currentPlan = useAppStore((s) => s.currentPlan);
+  const subscription = useAppStore((s) => s.subscription);
+  const esInstitucional = currentPlan === "institucional" || subscription?.plan_id === "institucional";
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -53,7 +55,7 @@ function MainContent({ user }: { user: User }) {
             {activeSection === "herramientas-ia" && <HerramientasIASection />}
             {activeSection === "suscripcion"    && <SuscripcionSection />}
             {activeSection === "afiliados"      && <AfiliatesSection />}
-            {activeSection === "directivos"     && currentPlan === "institucional" && <DirectivosSection />}
+            {activeSection === "directivos"     && esInstitucional && <DirectivosSection />}
           </div>
         </main>
       </div>

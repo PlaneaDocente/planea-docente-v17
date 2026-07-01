@@ -176,17 +176,42 @@ export const useAppStore = create<AppState>()(
 
         set({ isRefreshingSubscription: true, subscriptionError: null });
 
-        // Timeout de seguridad: SIEMPRE liberar después de 8s
+        // Timeout de seguridad: SIEMPRE liberar después de 14s
         const safetyTimeout = setTimeout(() => {
           console.warn("[AppStore] Safety timeout: liberando lock");
           set({ isRefreshingSubscription: false });
-        }, 8000);
+        }, 14000);
+
+        // Respaldo confiable: lee el plan directo de la BD (subscriptions → profiles)
+        const resolverPlanDesdeBD = async () => {
+          const uid = state.user?.id;
+          if (!uid) return;
+          try {
+            const { data: sub } = await supabase
+              .from("subscriptions")
+              .select("plan_id, estado")
+              .eq("user_id", uid)
+              .in("estado", ["active", "trialing"])
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (sub?.plan_id) {
+              set({ currentPlan: sub.plan_id as PlanType, subscription: { plan_id: sub.plan_id, estado: sub.estado || "active" } });
+              return;
+            }
+            const { data: profile } = await supabase
+              .from("profiles").select("is_pro, plan_actual").eq("id", uid).maybeSingle();
+            if (profile?.is_pro && profile.plan_actual) {
+              set({ currentPlan: profile.plan_actual as PlanType, subscription: { plan_id: profile.plan_actual, estado: "active" } });
+            }
+          } catch { /* sin conexión: mantener valor actual */ }
+        };
 
         try {
           const controller = new AbortController();
-          const fetchTimeout = setTimeout(() => controller.abort(), 6000);
+          const fetchTimeout = setTimeout(() => controller.abort(), 10000);
 
-          const res = await fetch("/api/user-subscription", {
+          const res = await fetch(`/api/user-subscription?user_id=${state.user?.id || ""}`, {
             method: "GET",
             headers: {
               "Content-Type": "application/json",
@@ -199,6 +224,8 @@ export const useAppStore = create<AppState>()(
           if (!res.ok) {
             if (res.status === 401) {
               set({ currentPlan: "gratuito", subscription: null });
+            } else {
+              await resolverPlanDesdeBD();
             }
             return;
           }
@@ -228,6 +255,8 @@ export const useAppStore = create<AppState>()(
         } catch (err: any) {
           console.error("[AppStore] Error:", err?.message);
           set({ subscriptionError: err?.message || "Error de conexión" });
+          // Si la API se canceló o falló, resolvemos el plan directo de la BD
+          await resolverPlanDesdeBD();
         } finally {
           clearTimeout(safetyTimeout);
           set({ isRefreshingSubscription: false });
