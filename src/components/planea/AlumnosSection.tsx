@@ -13,6 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useMisGrupos } from "./useMisGrupos";
+import { useAppStore } from "@/store/app-store";
+import { limitesDePlan } from "./planLimites";
 
 /* ═════════════════════ TIPOS ═════════════════════ */
 
@@ -311,6 +313,8 @@ function RegistroView() {
 function NuevoAlumnoModal({ onClose, userId, defaultGrupo }: { onClose: () => void; userId: string | null; defaultGrupo?: string }) {
   const grupoInicial = defaultGrupo || GRUPOS[0];
   const misGrupos = useMisGrupos();
+  const currentPlan = useAppStore((s) => s.currentPlan);
+  const lim = limitesDePlan(currentPlan);
   const [nombre, setNombre] = useState("");
   const [apellidos, setApellidos] = useState("");
   const [grupo, setGrupo] = useState(grupoInicial);
@@ -323,6 +327,17 @@ function NuevoAlumnoModal({ onClose, userId, defaultGrupo }: { onClose: () => vo
 
     setSaving(true);
     try {
+      // Límite de alumnos por grupo según el plan
+      const { count } = await supabase
+        .from("alumnos")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId).eq("grupo", grupo).eq("activo", true);
+      if (typeof count === "number" && count >= lim.maxAlumnosPorGrupo) {
+        toast.error(`El grupo ${grupo} ya tiene ${count} alumnos. Tu plan ${lim.planLabel} permite hasta ${lim.maxAlumnosPorGrupo} por grupo. Mejora tu plan para registrar más.`);
+        setSaving(false);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("alumnos")
         .insert({
@@ -372,6 +387,7 @@ function NuevoAlumnoModal({ onClose, userId, defaultGrupo }: { onClose: () => vo
             <select value={grupo} onChange={(e) => setGrupo(e.target.value)} className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm outline-none border border-border focus:border-primary">
               {(misGrupos.length ? misGrupos : GRUPOS).map((g) => <option key={g} value={g}>{g}</option>)}
             </select>
+            <p className="text-[10px] text-muted-foreground mt-1">Máx. {lim.maxAlumnosPorGrupo} alumnos/grupo (plan {lim.planLabel})</p>
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Grado</label>

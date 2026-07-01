@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useAppStore } from "@/store/app-store";
+import { limitesDePlan } from "./planLimites";
 import {
   store, useStoreItem, GRUPOS,
   type Alumno, type Tutor, type Padre, type Justificacion,
@@ -737,6 +739,8 @@ function DocenteManager() {
 
 function GruposManager() {
   const userId = useAuthUser();
+  const currentPlan = useAppStore((s) => s.currentPlan);
+  const lim = limitesDePlan(currentPlan);
   const [seleccionados, setSeleccionados] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -765,27 +769,45 @@ function GruposManager() {
   }, [userId]);
 
   const toggle = (g: string) => {
-    setSeleccionados((prev) => prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]);
+    const yaEsta = seleccionados.includes(g);
+    if (!yaEsta && seleccionados.length >= lim.maxGrupos) {
+      toast.error(`Tu plan ${lim.planLabel} permite hasta ${lim.maxGrupos} grupo(s). Mejora tu plan para agregar más.`);
+      return;
+    }
+    setSeleccionados((prev) => yaEsta ? prev.filter((x) => x !== g) : [...prev, g]);
   };
 
   const usarGruposDeAlumnos = async () => {
     if (!userId) return;
     const { data: al } = await supabase.from("alumnos").select("grupo").eq("user_id", userId).eq("activo", true);
-    const set = Array.from(new Set((al || []).map((a: { grupo?: string }) => (a.grupo || "").trim()).filter(Boolean)));
+    let set = Array.from(new Set((al || []).map((a: { grupo?: string }) => (a.grupo || "").trim()).filter(Boolean)));
     if (set.length === 0) { toast.error("No tienes alumnos registrados todavia."); return; }
+    if (set.length > lim.maxGrupos) {
+      set = set.slice(0, lim.maxGrupos);
+      toast.info(`Tu plan ${lim.planLabel} permite hasta ${lim.maxGrupos} grupo(s); se cargaron los primeros ${lim.maxGrupos}.`);
+    } else {
+      toast.success(`Se cargaron ${set.length} grupo(s) de tus alumnos.`);
+    }
     setSeleccionados(set);
-    toast.success(`Se cargaron ${set.length} grupo(s) de tus alumnos.`);
   };
 
   const agregarGrupo = () => {
     const g = `${nuevoGrado}${nuevaLetra}`;
     if (seleccionados.includes(g)) { toast.info(`${g} ya está en tu lista.`); return; }
+    if (seleccionados.length >= lim.maxGrupos) {
+      toast.error(`Tu plan ${lim.planLabel} permite hasta ${lim.maxGrupos} grupo(s). Mejora tu plan para agregar más.`);
+      return;
+    }
     setSeleccionados((prev) => [...prev, g].sort((a, b) => a.localeCompare(b, "es", { numeric: true })));
     toast.success(`${g} agregado.`);
   };
 
   const guardar = async () => {
     if (!userId) { toast.error("Inicia sesion."); return; }
+    if (seleccionados.length > lim.maxGrupos) {
+      toast.error(`Tu plan ${lim.planLabel} permite hasta ${lim.maxGrupos} grupo(s). Quita algunos antes de guardar.`);
+      return;
+    }
     setSaving(true);
     const ordenados = [...seleccionados].sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
     const { error } = await supabase.from("configuracion").upsert(
@@ -810,6 +832,10 @@ function GruposManager() {
       <p className="text-sm text-muted-foreground">
         Marca los grados y grupos que impartes. Apareceran por defecto en Alumnos, Asistencia, Evaluaciones, Padres, etc., sin que tengas que seleccionarlos en cada seccion.
       </p>
+
+      <div className="bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-xl px-3 py-2.5 text-xs text-indigo-700 dark:text-indigo-300">
+        Plan <b>{lim.planLabel}</b>: hasta <b>{lim.maxGrupos}</b> grupo(s) y <b>{lim.maxAlumnosPorGrupo}</b> alumnos por grupo. Seleccionados: <b>{seleccionados.length}/{lim.maxGrupos}</b>.
+      </div>
 
       <Button variant="outline" size="sm" className="gap-2" onClick={usarGruposDeAlumnos}>
         <GraduationCap className="w-4 h-4" /> Usar los grupos de mis alumnos
