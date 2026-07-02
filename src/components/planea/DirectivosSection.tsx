@@ -651,6 +651,7 @@ function FinanzasView() {
 function AvisosView() {
   const userId = useUserId();
   const [items, setItems] = useState<any[]>([]);
+  const [maestros, setMaestros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ titulo: "", mensaje: "" });
   const [saving, setSaving] = useState(false);
@@ -658,10 +659,29 @@ function AvisosView() {
   const cargar = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
-    const { data } = await supabase.from("directivos_avisos").select("*").eq("user_id", userId).order("creado_en", { ascending: false });
-    setItems(data || []); setLoading(false);
+    const [{ data: avisos }, { data: maes }] = await Promise.all([
+      supabase.from("directivos_avisos").select("*").eq("user_id", userId).order("creado_en", { ascending: false }),
+      supabase.from("directivos_maestros").select("*").eq("user_id", userId).eq("activo", true),
+    ]);
+    setItems(avisos || []);
+    setMaestros(maes || []);
+    setLoading(false);
   }, [userId]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  const textoAviso = (a: any) => a.mensaje ? `📢 ${a.titulo}\n\n${a.mensaje}` : `📢 ${a.titulo}`;
+
+  const enviarWhatsApp = (a: any) => {
+    const conTel = maestros.filter((m) => m.telefono);
+    if (conTel.length === 0) { toast.error("No hay maestros con teléfono registrados (pestaña Maestros)."); return; }
+    conTel.forEach((m) => openWhatsApp(m.telefono, `Hola ${m.nombre}: ${textoAviso(a)}`));
+    toast.success(`Abriendo WhatsApp para ${conTel.length} maestro(s).`);
+  };
+  const enviarCorreo = (a: any) => {
+    const emails = maestros.map((m) => m.email).filter(Boolean);
+    if (emails.length === 0) { toast.error("No hay maestros con correo registrados (pestaña Maestros)."); return; }
+    openEmailMultiple(emails, `Aviso de Dirección: ${a.titulo}`, textoAviso(a));
+  };
 
   const agregar = async () => {
     if (!form.titulo.trim()) { toast.error("Escribe el título del aviso."); return; }
@@ -682,6 +702,7 @@ function AvisosView() {
         <input value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder="Título del aviso" className="w-full bg-muted rounded-xl px-3 py-2 text-sm border border-border outline-none" />
         <textarea value={form.mensaje} onChange={(e) => setForm({ ...form, mensaje: e.target.value })} rows={3} placeholder="Mensaje…" className="w-full bg-muted rounded-xl px-3 py-2 text-sm border border-border outline-none resize-none" />
         <Button onClick={agregar} disabled={saving} className="gap-2">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Megaphone className="w-4 h-4" />} Publicar aviso</Button>
+        <p className="text-[11px] text-muted-foreground">Al publicar, el aviso queda en el tablero. Para que <b>llegue</b> a los maestros, usa los botones de <b>WhatsApp</b> o <b>Correo</b> en cada aviso (usa los maestros de la pestaña Maestros).</p>
       </div>
 
       {loading ? <div className="flex justify-center p-6"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> :
@@ -697,6 +718,15 @@ function AvisosView() {
                   <button onClick={() => eliminar(a.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 shrink-0"><Trash2 className="w-4 h-4" /></button>
                 </div>
                 {a.mensaje && <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">{a.mensaje}</p>}
+                <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-border">
+                  <Button size="sm" className="gap-2 bg-green-600 hover:bg-green-700" onClick={() => enviarWhatsApp(a)}>
+                    <Smartphone className="w-4 h-4" /> WhatsApp a maestros
+                  </Button>
+                  <Button size="sm" variant="outline" className="gap-2" onClick={() => enviarCorreo(a)}>
+                    <Mail className="w-4 h-4" /> Correo a maestros
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground self-center">{maestros.length} maestro(s) registrado(s)</span>
+                </div>
               </div>
             ))}
           </div>
