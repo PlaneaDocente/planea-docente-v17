@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   GraduationCap, LayoutDashboard, Users, CalendarCheck, BookOpen,
   ClipboardList, Star, Camera, FileText, MessageSquare, Settings,
-  LogOut, Crown, Zap, Menu, Loader2, Building2
+  LogOut, Crown, Zap, Menu, Loader2, Building2, MessagesSquare, Download
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,8 @@ const PadresSection = lazy(() => import("@/components/planea/PadresSection"));
 const HerramientasIASection = lazy(() => import("@/components/planea/HerramientasIASection"));
 const ConfiguracionSection = lazy(() => import("@/components/planea/ConfiguracionSection"));
 const DirectivosSection = lazy(() => import("@/components/planea/DirectivosSection"));
+const MensajeriaInstitucionalSection = lazy(() => import("@/components/planea/MensajeriaInstitucionalSection"));
+const DescargasSection = lazy(() => import("@/components/planea/DescargasSection"));
 
 const SECTIONS = [
   { id: "inicio",      label: "Dashboard",    icon: LayoutDashboard, component: DashboardSection, requiresPro: false },
@@ -38,8 +40,10 @@ const SECTIONS = [
   { id: "reportes",    label: "Reportes",     icon: FileText,         component: ReportesSection,    requiresPro: true },
   { id: "padres",      label: "Padres",       icon: MessageSquare,    component: PadresSection,      requiresPro: true },
   { id: "directivos",  label: "Directivos",   icon: Building2,        component: DirectivosSection,  requiresPro: true, soloInstitucional: true },
+  { id: "mensajeria",  label: "Mensajería",   icon: MessagesSquare,   component: MensajeriaInstitucionalSection, requiresPro: true, soloInstitucional: true },
   { id: "herramientas-ia", label: "Herramientas IA", icon: Zap,       component: HerramientasIASection, requiresPro: true },
   { id: "configuracion", label: "Configuración", icon: Settings,      component: ConfiguracionSection, requiresPro: false },
+  { id: "descargas",   label: "Descargar App", icon: Download,        component: DescargasSection,   requiresPro: false },
 ];
 
 export default function DashboardPage() {
