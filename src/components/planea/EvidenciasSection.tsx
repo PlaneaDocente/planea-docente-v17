@@ -1011,6 +1011,7 @@ function PortafolioView({ grupo, userId }: { grupo: string; userId: string | nul
   const [selectedAlumno, setSelectedAlumno] = useState<AlumnoPortafolio | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [loading, setLoading] = useState(true);
+  const [reload, setReload] = useState(0);
 
   // Cargar alumnos + evidencias desde Supabase
   useEffect(() => {
@@ -1074,7 +1075,7 @@ function PortafolioView({ grupo, userId }: { grupo: string; userId: string | nul
       }
     };
     cargar();
-  }, [userId, grupo]);
+  }, [userId, grupo, reload]);
 
   const filtered = alumnos.filter((a) => a.nombre.toLowerCase().includes(search.toLowerCase()));
 
@@ -1182,7 +1183,7 @@ function PortafolioView({ grupo, userId }: { grupo: string; userId: string | nul
       )}
 
       <AnimatePresence>
-        {selectedAlumno && <AlumnoPortafolioModal alumno={selectedAlumno} onClose={() => setSelectedAlumno(null)} />}
+        {selectedAlumno && <AlumnoPortafolioModal alumno={selectedAlumno} onClose={() => setSelectedAlumno(null)} onDeleted={() => setReload((r) => r + 1)} />}
       </AnimatePresence>
     </div>
   );
@@ -1190,18 +1191,35 @@ function PortafolioView({ grupo, userId }: { grupo: string; userId: string | nul
 
 /* ═════════════════════ MODAL PORTAFOLIO ALUMNO ═════════════════════ */
 
-function AlumnoPortafolioModal({ alumno, onClose }: { alumno: AlumnoPortafolio; onClose: () => void }) {
+function AlumnoPortafolioModal({ alumno, onClose, onDeleted }: { alumno: AlumnoPortafolio; onClose: () => void; onDeleted?: () => void }) {
   const [activeTab, setActiveTab] = useState<"todas" | "foto" | "documento" | "video">("todas");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewTipo, setPreviewTipo] = useState<EvidenciaTipo | null>(null);
+  const [evidencias, setEvidencias] = useState(alumno.evidencias);
 
-  const filtered = activeTab === "todas" ? alumno.evidencias : alumno.evidencias.filter((e) => e.tipo === activeTab);
+  const handleDeleteEvidencia = async (ev: any) => {
+    if (!confirm(`¿Eliminar la evidencia "${ev.titulo || "sin título"}" de ${alumno.nombre}?`)) return;
+    try {
+      if (ev.storage_path) {
+        await supabase.storage.from("evidencias").remove([ev.storage_path]);
+      }
+      const { error } = await supabase.from("evidencias").delete().eq("id", ev.id);
+      if (error) throw error;
+      setEvidencias((prev) => prev.filter((e) => e.id !== ev.id));
+      toast.success("Evidencia eliminada.");
+      onDeleted?.();
+    } catch (err: any) {
+      toast.error("Error eliminando: " + err.message);
+    }
+  };
+
+  const filtered = activeTab === "todas" ? evidencias : evidencias.filter((e) => e.tipo === activeTab);
 
   const tabs = [
-    { id: "todas" as const, label: "Todas", count: alumno.evidencias.length },
-    { id: "foto" as const, label: "Fotos", count: alumno.evidencias.filter((e) => e.tipo === "foto").length },
-    { id: "documento" as const, label: "Docs", count: alumno.evidencias.filter((e) => e.tipo === "documento").length },
-    { id: "video" as const, label: "Videos", count: alumno.evidencias.filter((e) => e.tipo === "video").length },
+    { id: "todas" as const, label: "Todas", count: evidencias.length },
+    { id: "foto" as const, label: "Fotos", count: evidencias.filter((e) => e.tipo === "foto").length },
+    { id: "documento" as const, label: "Docs", count: evidencias.filter((e) => e.tipo === "documento").length },
+    { id: "video" as const, label: "Videos", count: evidencias.filter((e) => e.tipo === "video").length },
   ];
 
   return (
@@ -1262,6 +1280,12 @@ function AlumnoPortafolioModal({ alumno, onClose }: { alumno: AlumnoPortafolio; 
                     <Badge className="absolute top-2 right-2 text-[10px] bg-black/60 text-white backdrop-blur-sm">
                       {ev.tipo === "foto" ? "Foto" : ev.tipo === "video" ? "Video" : "Doc"}
                     </Badge>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteEvidencia(ev); }}
+                      className="absolute top-2 left-2 p-1.5 rounded-lg bg-black/50 text-white hover:bg-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Eliminar evidencia">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                   <div className="p-3">
                     <p className="text-xs font-medium truncate">{ev.titulo}</p>

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Building2, LayoutDashboard, UserCog, GraduationCap, CalendarDays,
   Megaphone, Boxes, Plus, Trash2, Loader2, Mail, Smartphone, Send,
-  Users, DollarSign, School, Wrench, CheckCircle2,
+  Users, DollarSign, School, Wrench, CheckCircle2, Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -31,6 +31,111 @@ function useUserId() {
   return uid;
 }
 
+async function sha256(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export default function DirectivosSection() {
+  const userId = useUserId();
+  const [unlocked, setUnlocked] = useState(false);
+  const [pinSet, setPinSet] = useState<boolean | null>(null);
+  const [pin, setPin] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      try {
+        const { data } = await supabase.from("configuracion").select("directivo_pin").eq("user_id", userId).maybeSingle();
+        setPinSet(!!(data as { directivo_pin?: string } | null)?.directivo_pin);
+      } catch { setPinSet(false); }
+    })();
+  }, [userId]);
+
+  const crearPin = async () => {
+    if (!/^\d{4,8}$/.test(pin)) { toast.error("El PIN debe ser de 4 a 8 dígitos."); return; }
+    if (pin !== pinConfirm) { toast.error("Los PIN no coinciden."); return; }
+    if (!userId) return;
+    setBusy(true);
+    const hash = await sha256(pin);
+    const { error } = await supabase.from("configuracion").upsert(
+      { user_id: userId, directivo_pin: hash, actualizado_en: new Date().toISOString() },
+      { onConflict: "user_id" }
+    );
+    setBusy(false);
+    if (error) { toast.error(error.code === "42703" ? "Falta la columna del PIN: corre el SQL de Directivos PIN en Supabase." : error.message); return; }
+    toast.success("PIN de directivo creado.");
+    setPin(""); setPinConfirm(""); setPinSet(true); setUnlocked(true);
+  };
+
+  const verificarPin = async () => {
+    if (!userId || pin.length < 4) { toast.error("Ingresa tu PIN."); return; }
+    setBusy(true);
+    const hash = await sha256(pin);
+    const { data } = await supabase.from("configuracion").select("directivo_pin").eq("user_id", userId).maybeSingle();
+    setBusy(false);
+    if ((data as { directivo_pin?: string } | null)?.directivo_pin === hash) {
+      setUnlocked(true); setPin("");
+    } else {
+      toast.error("PIN incorrecto.");
+    }
+  };
+
+  if (unlocked) {
+    return (
+      <div>
+        <div className="flex justify-end mb-2">
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => setUnlocked(false)}>
+            <Lock className="w-4 h-4" /> Bloquear
+          </Button>
+        </div>
+        <DirectivosContent />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-md mx-auto mt-6">
+      <div className="bg-card rounded-2xl border border-border shadow-sm p-6 text-center space-y-4">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white mx-auto">
+          <Lock className="w-7 h-7" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold">Área de Directivos protegida</h2>
+          <p className="text-sm text-muted-foreground">
+            {pinSet === null ? "Verificando…" : pinSet
+              ? "Ingresa tu PIN de directivo para acceder."
+              : "Crea un PIN para proteger esta área. Los maestros no podrán entrar sin él."}
+          </p>
+        </div>
+
+        {pinSet === false && (
+          <div className="space-y-2">
+            <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} placeholder="Nuevo PIN (4 a 8 dígitos)" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm text-center tracking-widest border border-border outline-none" maxLength={8} />
+            <input type="password" inputMode="numeric" value={pinConfirm} onChange={(e) => setPinConfirm(e.target.value.replace(/\D/g, ""))} placeholder="Confirmar PIN" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm text-center tracking-widest border border-border outline-none" maxLength={8} />
+            <Button className="w-full gap-2" onClick={crearPin} disabled={busy}>
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Crear PIN y entrar
+            </Button>
+          </div>
+        )}
+
+        {pinSet === true && (
+          <div className="space-y-2">
+            <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => { if (e.key === "Enter") verificarPin(); }} placeholder="PIN de directivo" className="w-full bg-muted rounded-xl px-3 py-2.5 text-sm text-center tracking-widest border border-border outline-none" maxLength={8} autoFocus />
+            <Button className="w-full gap-2" onClick={verificarPin} disabled={busy}>
+              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />} Entrar
+            </Button>
+          </div>
+        )}
+
+        <p className="text-[11px] text-muted-foreground">El PIN se guarda cifrado en tu cuenta. Si lo olvidas, puedes restablecerlo desde Supabase (columna directivo_pin).</p>
+      </div>
+    </div>
+  );
+}
+
 function openEmailMultiple(emails: string[], subject: string, body: string) {
   const clean = emails.filter(Boolean);
   if (clean.length === 0) { toast.error("No hay correos disponibles."); return; }
@@ -43,7 +148,7 @@ function openWhatsApp(phone: string, message: string) {
   window.open(`https://wa.me/${num}?text=${encodeURIComponent(message)}`, "_blank");
 }
 
-export default function DirectivosSection() {
+function DirectivosContent() {
   const [tab, setTab] = useState<DirTab>("panel");
 
   return (
