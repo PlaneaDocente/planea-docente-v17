@@ -654,6 +654,7 @@ function AvisosView() {
   const [maestros, setMaestros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({ titulo: "", mensaje: "" });
+  const [sel, setSel] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
 
   const cargar = useCallback(async () => {
@@ -661,53 +662,109 @@ function AvisosView() {
     setLoading(true);
     const [{ data: avisos }, { data: maes }] = await Promise.all([
       supabase.from("directivos_avisos").select("*").eq("user_id", userId).order("creado_en", { ascending: false }),
-      supabase.from("directivos_maestros").select("*").eq("user_id", userId).eq("activo", true),
+      supabase.from("directivos_maestros").select("*").eq("user_id", userId).eq("activo", true).order("nombre", { ascending: true }),
     ]);
     setItems(avisos || []);
-    setMaestros(maes || []);
+    const lista = maes || [];
+    setMaestros(lista);
+    const all: Record<string, boolean> = {};
+    lista.forEach((m: any) => { all[m.id] = true; });
+    setSel(all);
     setLoading(false);
   }, [userId]);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const textoAviso = (a: any) => a.mensaje ? `📢 ${a.titulo}\n\n${a.mensaje}` : `📢 ${a.titulo}`;
-
-  const enviarWhatsApp = (a: any) => {
-    const conTel = maestros.filter((m) => m.telefono);
-    if (conTel.length === 0) { toast.error("No hay maestros con teléfono registrados (pestaña Maestros)."); return; }
-    conTel.forEach((m) => openWhatsApp(m.telefono, `Hola ${m.nombre}: ${textoAviso(a)}`));
-    toast.success(`Abriendo WhatsApp para ${conTel.length} maestro(s).`);
-  };
-  const enviarCorreo = (a: any) => {
-    const emails = maestros.map((m) => m.email).filter(Boolean);
-    if (emails.length === 0) { toast.error("No hay maestros con correo registrados (pestaña Maestros)."); return; }
-    openEmailMultiple(emails, `Aviso de Dirección: ${a.titulo}`, textoAviso(a));
+  const seleccionados = maestros.filter((m) => sel[m.id]);
+  const todosSel = maestros.length > 0 && seleccionados.length === maestros.length;
+  const toggle = (id: string) => setSel((s) => ({ ...s, [id]: !s[id] }));
+  const toggleTodos = () => {
+    const v = !todosSel; const n: Record<string, boolean> = {};
+    maestros.forEach((m) => { n[m.id] = v; }); setSel(n);
   };
 
-  const agregar = async () => {
+  const textoAviso = (t: string, msg: string) => msg ? `\uD83D\uDCE2 ${t}\n\n${msg}` : `\uD83D\uDCE2 ${t}`;
+
+  const publicarYEnviar = async (canal: "whatsapp" | "correo") => {
     if (!form.titulo.trim()) { toast.error("Escribe el título del aviso."); return; }
     if (!userId) return;
+    if (maestros.length === 0) { toast.error("No hay maestros registrados. Agrégalos en la pestaña Maestros."); return; }
+    if (seleccionados.length === 0) { toast.error("Selecciona al menos un maestro."); return; }
+    const texto = textoAviso(form.titulo.trim(), form.mensaje);
+
+    if (canal === "correo") {
+      const emails = seleccionados.map((m) => m.email).filter(Boolean);
+      if (emails.length === 0) { toast.error("Los maestros seleccionados no tienen correo."); return; }
+    } else {
+      const conTel = seleccionados.filter((m) => m.telefono);
+      if (conTel.length === 0) { toast.error("Los maestros seleccionados no tienen teléfono."); return; }
+    }
+
     setSaving(true);
     const { error } = await supabase.from("directivos_avisos").insert({ user_id: userId, titulo: form.titulo.trim(), mensaje: form.mensaje });
     setSaving(false);
     if (error) { toast.error(error.code === "42P01" ? "Corre el SQL de Directivos en Supabase." : error.message); return; }
-    toast.success("Aviso publicado."); setForm({ titulo: "", mensaje: "" }); cargar();
+
+    if (canal === "correo") {
+      const emails = seleccionados.map((m) => m.email).filter(Boolean);
+      openEmailMultiple(emails, `Aviso de Dirección: ${form.titulo.trim()}`, texto);
+      toast.success(`Aviso publicado y correo abierto para ${emails.length} maestro(s).`);
+    } else {
+      const conTel = seleccionados.filter((m) => m.telefono);
+      conTel.forEach((m) => openWhatsApp(m.telefono, `Hola ${m.nombre}: ${texto}`));
+      toast.success(`Aviso publicado. Abriendo WhatsApp para ${conTel.length} maestro(s).`);
+    }
+    setForm({ titulo: "", mensaje: "" });
+    cargar();
   };
+
   const eliminar = async (id: string) => { if (!confirm("¿Eliminar aviso?")) return; await supabase.from("directivos_avisos").delete().eq("id", id); cargar(); };
   const fmt = (d: string) => new Date(d).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" });
 
   return (
     <div className="space-y-4">
       <div className="bg-card rounded-2xl border border-border p-4 space-y-3">
-        <p className="text-sm font-semibold flex items-center gap-2"><Megaphone className="w-4 h-4 text-primary" /> Nuevo aviso interno (para maestros)</p>
+        <p className="text-sm font-semibold flex items-center gap-2"><Megaphone className="w-4 h-4 text-primary" /> Nuevo aviso (se envía a los maestros al publicar)</p>
         <input value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} placeholder="Título del aviso" className="w-full bg-muted rounded-xl px-3 py-2 text-sm border border-border outline-none" />
         <textarea value={form.mensaje} onChange={(e) => setForm({ ...form, mensaje: e.target.value })} rows={3} placeholder="Mensaje…" className="w-full bg-muted rounded-xl px-3 py-2 text-sm border border-border outline-none resize-none" />
-        <Button onClick={agregar} disabled={saving} className="gap-2">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Megaphone className="w-4 h-4" />} Publicar aviso</Button>
-        <p className="text-[11px] text-muted-foreground">Al publicar, el aviso queda en el tablero. Para que <b>llegue</b> a los maestros, usa los botones de <b>WhatsApp</b> o <b>Correo</b> en cada aviso (usa los maestros de la pestaña Maestros).</p>
+
+        <div className="border border-border rounded-xl p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold">Enviar a:</p>
+            {maestros.length > 0 && (
+              <button onClick={toggleTodos} className="text-xs text-primary font-medium">{todosSel ? "Quitar todos" : "Todos los maestros"}</button>
+            )}
+          </div>
+          {maestros.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No hay maestros registrados. Agrégalos en la pestaña <b>Maestros</b> (con teléfono y/o correo).</p>
+          ) : (
+            <div className="max-h-40 overflow-y-auto space-y-1">
+              {maestros.map((m) => (
+                <label key={m.id} className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-muted/50 cursor-pointer">
+                  <input type="checkbox" checked={!!sel[m.id]} onChange={() => toggle(m.id)} className="w-4 h-4 accent-primary" />
+                  <span className="text-sm flex-1 truncate">{m.nombre}</span>
+                  <span className="text-[11px] text-muted-foreground">{m.telefono ? " WhatsApp" : ""}{m.email ? " Correo" : ""}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {maestros.length > 0 && <p className="text-[11px] text-muted-foreground">{seleccionados.length} de {maestros.length} seleccionados</p>}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button className="gap-2 bg-green-600 hover:bg-green-700" onClick={() => publicarYEnviar("whatsapp")} disabled={saving || maestros.length === 0}>
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Smartphone className="w-4 h-4" />} Publicar y enviar por WhatsApp
+          </Button>
+          <Button variant="outline" className="gap-2" onClick={() => publicarYEnviar("correo")} disabled={saving || maestros.length === 0}>
+            <Mail className="w-4 h-4" /> Publicar y enviar por Correo
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">El <b>correo</b> llega a todos los seleccionados de una vez (copia oculta). El <b>WhatsApp</b> se abre uno por uno (limitación de WhatsApp web).</p>
       </div>
 
       {loading ? <div className="flex justify-center p-6"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> :
-        items.length === 0 ? <p className="text-sm text-muted-foreground text-center py-6">No hay avisos internos.</p> : (
+        items.length === 0 ? <p className="text-sm text-muted-foreground text-center py-6">No hay avisos publicados.</p> : (
           <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground">Historial de avisos</p>
             {items.map((a) => (
               <div key={a.id} className="bg-card rounded-xl border border-border p-4">
                 <div className="flex items-start justify-between gap-2">
@@ -718,15 +775,6 @@ function AvisosView() {
                   <button onClick={() => eliminar(a.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 shrink-0"><Trash2 className="w-4 h-4" /></button>
                 </div>
                 {a.mensaje && <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap">{a.mensaje}</p>}
-                <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-border">
-                  <Button size="sm" className="gap-2 bg-green-600 hover:bg-green-700" onClick={() => enviarWhatsApp(a)}>
-                    <Smartphone className="w-4 h-4" /> WhatsApp a maestros
-                  </Button>
-                  <Button size="sm" variant="outline" className="gap-2" onClick={() => enviarCorreo(a)}>
-                    <Mail className="w-4 h-4" /> Correo a maestros
-                  </Button>
-                  <span className="text-[11px] text-muted-foreground self-center">{maestros.length} maestro(s) registrado(s)</span>
-                </div>
               </div>
             ))}
           </div>
