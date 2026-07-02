@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Toaster } from "@/components/ui/sonner";
 import GlobalClientEffects from "@/components/GlobalClientEffects";
+import PwaRegister from "./pwa-register";
 import { AppStoreProvider } from "@/store/app-store";
 
 import "./globals.css";
@@ -112,6 +113,7 @@ export default function RootLayout({
           >
             {children}
             <GlobalClientEffects />
+            <PwaRegister />
           </ThemeProvider>
         </AppStoreProvider>
       </body>
